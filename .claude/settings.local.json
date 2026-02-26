@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:help.zwidgets.com)",
+      "WebFetch(domain:www.zoho.com)",
+      "WebFetch(domain:www.marksgroup.net)"
+    ]
+  }
+}
