@@ -22,12 +22,33 @@ const CONNECTION = "zoho_crm_conn_used_in_widget_do_not_delete";
 
 const REQUIREMENT_OPTIONS = ["Required", "Optional"];
 
+const FILE_TYPE_OPTIONS = [
+  "PDF",
+  "PNG",
+  "JPG",
+  "JPEG",
+  "HEIC",
+  "WebP",
+  "GIF",
+  "TIFF",
+  "DOC",
+  "DOCX",
+  "XLS",
+  "XLSX",
+  "PPT",
+  "PPTX",
+  "TXT",
+  "CSV",
+];
+
 function createField() {
   return {
     id: Date.now() + Math.random(),
     name: "",
     checked: true,
     requirement: "Required",
+    fileTypes: [],
+    uploadCount: 1,
   };
 }
 
@@ -124,11 +145,6 @@ function TemplateEditorDialog({
           method: "GET",
           param_type: 1,
         });
-        console.log(
-          resp?.details?.statusMessage?.fields.filter(
-            (fields) => fields?.data_type === "text",
-          ),
-        );
         const list =
           resp?.details?.statusMessage?.fields.filter(
             (fields) => fields?.data_type === "text",
@@ -208,6 +224,7 @@ function TemplateEditorDialog({
         documentRequirements: fields,
       },
     };
+    console.log(recordData);
 
     if (isEditMode) {
       const updatedResp = await ZOHO.CRM.API.updateRecord({
@@ -244,7 +261,7 @@ function TemplateEditorDialog({
   };
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ pb: 1 }}>
         <Typography variant="h6" fontWeight={700}>
           {isEditMode ? "Edit Checklist Template" : "Checklist Template Editor"}
@@ -252,106 +269,136 @@ function TemplateEditorDialog({
       </DialogTitle>
 
       <DialogContent sx={{ pt: 1 }}>
-        {/* Template Name */}
-        <Typography variant="caption" color="text.secondary" fontWeight={500}>
-          Template Name
-        </Typography>
-        <TextField
-          fullWidth
-          size="small"
-          placeholder="Put a Name here"
-          value={templateName}
-          onChange={(e) => {
-            setTemplateName(e.target.value);
-            setErrors((p) => ({ ...p, templateName: undefined }));
-          }}
-          error={!!errors.templateName}
-          helperText={errors.templateName}
-          sx={{ mt: 0.5, mb: 1 }}
-        />
-
-        {/* Module Name */}
-        <Typography variant="caption" color="text.secondary" fontWeight={500}>
-          Module Name
-        </Typography>
-        <Autocomplete
-          options={modules}
-          value={moduleName}
-          onChange={(_, val) => {
-            setModuleName(val);
-            setErrors((p) => ({ ...p, moduleName: undefined }));
-          }}
-          loading={modulesLoading}
-          isOptionEqualToValue={(option, val) => option.value === val.value}
-          size="small"
-          renderInput={(params) => (
+        {/* Row 1: Template Name + Module Name */}
+        <Box sx={{ display: "flex", gap: 2, mb: 1 }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              fontWeight={500}
+            >
+              Template Name
+            </Typography>
             <TextField
-              {...params}
-              placeholder="Select a module"
-              error={!!errors.moduleName}
-              helperText={errors.moduleName}
-              sx={{ mt: 0.5, mb: 1 }}
+              fullWidth
+              size="small"
+              placeholder="Put a Name here"
+              value={templateName}
+              onChange={(e) => {
+                setTemplateName(e.target.value);
+                setErrors((p) => ({ ...p, templateName: undefined }));
+              }}
+              error={!!errors.templateName}
+              helperText={errors.templateName}
+              sx={{ mt: 0.5 }}
             />
-          )}
-        />
+          </Box>
+          <Box sx={{ flex: 1 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              fontWeight={500}
+            >
+              Module Name
+            </Typography>
+            <Autocomplete
+              options={modules}
+              value={moduleName}
+              onChange={(_, val) => {
+                setModuleName(val);
+                setErrors((p) => ({ ...p, moduleName: undefined }));
+              }}
+              loading={modulesLoading}
+              isOptionEqualToValue={(option, val) => option.value === val.value}
+              size="small"
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  placeholder="Select a module"
+                  error={!!errors.moduleName}
+                  helperText={errors.moduleName}
+                  sx={{ mt: 0.5 }}
+                />
+              )}
+            />
+          </Box>
+        </Box>
 
-        {/* Password Field */}
-        <Typography variant="caption" color="text.secondary" fontWeight={500}>
-          Password Field
-        </Typography>
-        <Autocomplete
-          options={moduleFields.filter((f) => f.value !== workdriveFolder?.value)}
-          value={passwordField}
-          onChange={(_, val) => {
-            setPasswordField(val);
-            setErrors((p) => ({ ...p, passwordField: undefined }));
-          }}
-          loading={moduleFieldsLoading}
-          disabled={!moduleName}
-          isOptionEqualToValue={(option, val) => option.value === val.value}
-          size="small"
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              placeholder={
-                moduleName ? "Select a password field" : "Select a module first"
-              }
-              error={!!errors.passwordField}
-              helperText={errors.passwordField}
-              sx={{ mt: 0.5, mb: 1 }}
+        {/* Row 2: Password Field + Workdrive Folder ID Field */}
+        <Box sx={{ display: "flex", gap: 2, mb: 2 }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              fontWeight={500}
+            >
+              Password Field
+            </Typography>
+            <Autocomplete
+              options={moduleFields.filter(
+                (f) => f.value !== workdriveFolder?.value,
+              )}
+              value={passwordField}
+              onChange={(_, val) => {
+                setPasswordField(val);
+                setErrors((p) => ({ ...p, passwordField: undefined }));
+              }}
+              loading={moduleFieldsLoading}
+              disabled={!moduleName}
+              isOptionEqualToValue={(option, val) => option.value === val.value}
+              size="small"
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  placeholder={
+                    moduleName
+                      ? "Select a password field"
+                      : "Select a module first"
+                  }
+                  error={!!errors.passwordField}
+                  helperText={errors.passwordField}
+                  sx={{ mt: 0.5 }}
+                />
+              )}
             />
-          )}
-        />
-
-        {/* Workdrive Folder ID Field */}
-        <Typography variant="caption" color="text.secondary" fontWeight={500}>
-          Workdrive Folder ID Field
-        </Typography>
-        <Autocomplete
-          options={moduleFields.filter((f) => f.value !== passwordField?.value)}
-          value={workdriveFolder}
-          onChange={(_, val) => {
-            setWorkdriveFolder(val);
-            setErrors((p) => ({ ...p, workdriveFolder: undefined }));
-          }}
-          loading={moduleFieldsLoading}
-          disabled={!moduleName}
-          isOptionEqualToValue={(option, val) => option.value === val.value}
-          size="small"
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              placeholder={
-                moduleName
-                  ? "Select a folder ID field"
-                  : "Select a module first"
-              }
-              error={!!errors.workdriveFolder}
-              helperText={errors.workdriveFolder}
-              sx={{ mt: 0.5, mb: 2 }}
+          </Box>
+          <Box sx={{ flex: 1 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              fontWeight={500}
+            >
+              Workdrive Folder ID Field
+            </Typography>
+            <Autocomplete
+              options={moduleFields.filter(
+                (f) => f.value !== passwordField?.value,
+              )}
+              value={workdriveFolder}
+              onChange={(_, val) => {
+                setWorkdriveFolder(val);
+                setErrors((p) => ({ ...p, workdriveFolder: undefined }));
+              }}
+              loading={moduleFieldsLoading}
+              disabled={!moduleName}
+              isOptionEqualToValue={(option, val) => option.value === val.value}
+              size="small"
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  placeholder={
+                    moduleName
+                      ? "Select a folder ID field"
+                      : "Select a module first"
+                  }
+                  error={!!errors.workdriveFolder}
+                  helperText={errors.workdriveFolder}
+                  sx={{ mt: 0.5 }}
+                />
+              )}
             />
-          )}
-        />
+          </Box>
+        </Box>
 
         {/* Document Requirements */}
         <Typography variant="subtitle1" fontWeight={700} mb={1.5}>
@@ -363,61 +410,113 @@ function TemplateEditorDialog({
             <Box
               key={field.id}
               sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 1,
                 border: `1px solid ${errors.fieldNames && !field.name.trim() ? "#e53935" : "#e0e4ea"}`,
                 borderRadius: 1.5,
                 px: 1,
-                py: 0.5,
+                pt: 0.5,
+                pb: 1,
               }}
             >
-              <Checkbox
-                checked={field.checked}
-                onChange={(e) =>
-                  handleFieldChange(field.id, "checked", e.target.checked)
-                }
-                size="small"
-                sx={{ color: "#1b3a6b", "&.Mui-checked": { color: "#1b3a6b" } }}
-              />
+              {/* Line 1: checkbox, name, remove */}
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <Checkbox
+                  checked={field.checked}
+                  onChange={(e) =>
+                    handleFieldChange(field.id, "checked", e.target.checked)
+                  }
+                  size="small"
+                  sx={{
+                    color: "#1b3a6b",
+                    "&.Mui-checked": { color: "#1b3a6b" },
+                  }}
+                />
 
-              <TextField
-                variant="standard"
-                placeholder="Field name"
-                value={field.name}
-                onChange={(e) => {
-                  handleFieldChange(field.id, "name", e.target.value);
-                  setErrors((p) => ({ ...p, fieldNames: undefined }));
+                <TextField
+                  variant="standard"
+                  placeholder="Field name"
+                  value={field.name}
+                  onChange={(e) => {
+                    handleFieldChange(field.id, "name", e.target.value);
+                    setErrors((p) => ({ ...p, fieldNames: undefined }));
+                  }}
+                  size="small"
+                  slotProps={{ input: { disableUnderline: true } }}
+                  sx={{ flex: 1 }}
+                />
+
+                <IconButton
+                  size="small"
+                  onClick={() => handleRemoveField(field.id)}
+                  sx={{ color: "#e53935" }}
+                >
+                  ✕
+                </IconButton>
+              </Box>
+
+              {/* Line 2: file types, requirement, upload count */}
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  pl: 1.5,
+                  mt: 0.5,
                 }}
-                size="small"
-                InputProps={{ disableUnderline: true }}
-                sx={{ flex: 1 }}
-              />
-
-              <Select
-                value={field.requirement}
-                onChange={(e) =>
-                  handleFieldChange(field.id, "requirement", e.target.value)
-                }
-                size="small"
-                variant="standard"
-                disableUnderline
-                sx={{ fontSize: 13, color: "text.secondary", minWidth: 90 }}
               >
-                {REQUIREMENT_OPTIONS.map((opt) => (
-                  <MenuItem key={opt} value={opt} sx={{ fontSize: 13 }}>
-                    {opt}
-                  </MenuItem>
-                ))}
-              </Select>
+                <Autocomplete
+                  multiple
+                  options={FILE_TYPE_OPTIONS}
+                  value={field.fileTypes}
+                  onChange={(_, val) =>
+                    handleFieldChange(field.id, "fileTypes", val)
+                  }
+                  size="small"
+                  disableCloseOnSelect
+                  slotProps={{ chip: { size: "small" } }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      placeholder={
+                        field.fileTypes.length === 0 ? "File types" : ""
+                      }
+                    />
+                  )}
+                  sx={{ flex: 1 }}
+                />
 
-              <IconButton
-                size="small"
-                onClick={() => handleRemoveField(field.id)}
-                sx={{ color: "#e53935" }}
-              >
-                ✕
-              </IconButton>
+                <TextField
+                  type="number"
+                  size="small"
+                  label="Upload Count"
+                  value={field.uploadCount}
+                  onChange={(e) =>
+                    handleFieldChange(
+                      field.id,
+                      "uploadCount",
+                      Math.max(1, Number(e.target.value)),
+                    )
+                  }
+                  slotProps={{ htmlInput: { min: 1 } }}
+                  sx={{ width: 130 }}
+                />
+
+                <Select
+                  value={field.requirement}
+                  onChange={(e) =>
+                    handleFieldChange(field.id, "requirement", e.target.value)
+                  }
+                  size="small"
+                  variant="standard"
+                  disableUnderline
+                  sx={{ fontSize: 13, color: "text.secondary", minWidth: 90 }}
+                >
+                  {REQUIREMENT_OPTIONS.map((opt) => (
+                    <MenuItem key={opt} value={opt} sx={{ fontSize: 13 }}>
+                      {opt}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </Box>
             </Box>
           ))}
         </Box>
