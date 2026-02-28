@@ -14,24 +14,11 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const ZOHO = window.ZOHO;
 
 const CONNECTION = "zoho_crm_conn_used_in_widget_do_not_delete";
-
-// Demo options — will be replaced with real data later
-const PASSWORD_FIELD_OPTIONS = [
-  "Pass_Deals",
-  "Pass_Contacts",
-  "Pass_Leads",
-  "Pass_Accounts",
-];
-const WORKDRIVE_FOLDER_OPTIONS = [
-  "1212121121212",
-  "2323232232323",
-  "3434343343434",
-];
 
 const REQUIREMENT_OPTIONS = ["Required", "Optional"];
 
@@ -44,7 +31,12 @@ function createField() {
   };
 }
 
-function TemplateEditorDialog({ open, onClose }) {
+function TemplateEditorDialog({
+  open,
+  onClose,
+  onTemplateCreated,
+  editRecord,
+}) {
   const [templateName, setTemplateName] = useState("");
   const [moduleName, setModuleName] = useState(null);
   const [passwordField, setPasswordField] = useState(null);
@@ -52,9 +44,19 @@ function TemplateEditorDialog({ open, onClose }) {
   const [fields, setFields] = useState([createField()]);
   const [modules, setModules] = useState([]);
   const [modulesLoading, setModulesLoading] = useState(false);
+  const [moduleFields, setModuleFields] = useState([]);
+  const [moduleFieldsLoading, setModuleFieldsLoading] = useState(false);
+  const [errors, setErrors] = useState({});
 
+  // Holds passwordField/workdriveFolder to restore after module fields load in edit mode
+  const pendingFieldsRef = useRef(null);
+
+  const isEditMode = !!editRecord;
+
+  // Fetch modules on open; pre-fill form if editing
   useEffect(() => {
     if (!open) return;
+
     const fetchModules = async () => {
       setModulesLoading(true);
       try {
@@ -63,8 +65,15 @@ function TemplateEditorDialog({ open, onClose }) {
           method: "GET",
           param_type: 1,
         });
-        console.log(resp);
-        const list = resp?.details?.statusMessage?.modules ?? [];
+        const list =
+          resp?.details?.statusMessage?.modules?.filter(
+            (modules) =>
+              modules?.api_supported === true &&
+              modules?.status === "visible" &&
+              (modules?.generated_type === "default" ||
+                modules?.generated_type === "custom") &&
+              modules?.editable === true,
+          ) ?? [];
         setModules(
           list.map((m) => ({ label: m.plural_label, value: m.api_name })),
         );
@@ -74,8 +83,85 @@ function TemplateEditorDialog({ open, onClose }) {
         setModulesLoading(false);
       }
     };
+
     fetchModules();
-  }, [open]);
+
+    if (editRecord) {
+      const parsed =
+        typeof editRecord.Template_JSON === "string"
+          ? JSON.parse(editRecord.Template_JSON)
+          : editRecord.Template_JSON;
+
+      setTemplateName(parsed.templateName || editRecord.Name || "");
+      setFields(
+        parsed.documentRequirements?.length
+          ? parsed.documentRequirements
+          : [createField()],
+      );
+
+      // Store pending values — restored after module fields are fetched
+      pendingFieldsRef.current = {
+        passwordField: parsed.passwordField || null,
+        workdriveFolder: parsed.workdriveFolder || null,
+      };
+
+      setModuleName(parsed.moduleName || null);
+    }
+  }, [open, editRecord]);
+
+  // Fetch module fields whenever module changes; restore edit values if pending
+  useEffect(() => {
+    setPasswordField(null);
+    setWorkdriveFolder(null);
+    setModuleFields([]);
+    if (!moduleName) return;
+
+    const fetchFields = async () => {
+      setModuleFieldsLoading(true);
+      try {
+        const resp = await ZOHO.CRM.CONNECTION.invoke(CONNECTION, {
+          url: `https://www.zohoapis.eu/crm/v8/settings/fields?module=${moduleName.value}`,
+          method: "GET",
+          param_type: 1,
+        });
+        console.log(
+          resp?.details?.statusMessage?.fields.filter(
+            (fields) => fields?.data_type === "text",
+          ),
+        );
+        const list =
+          resp?.details?.statusMessage?.fields.filter(
+            (fields) => fields?.data_type === "text",
+          ) ?? [];
+        const mapped = list.map((f) => ({
+          label: f.display_label,
+          value: f.api_name,
+        }));
+        setModuleFields(mapped);
+
+        // Restore pending values from edit mode
+        if (pendingFieldsRef.current) {
+          const { passwordField: pf, workdriveFolder: wf } =
+            pendingFieldsRef.current;
+          if (pf) {
+            const match = mapped.find((f) => f.value === pf.value);
+            if (match) setPasswordField(match);
+          }
+          if (wf) {
+            const match = mapped.find((f) => f.value === wf.value);
+            if (match) setWorkdriveFolder(match);
+          }
+          pendingFieldsRef.current = null;
+        }
+      } catch (err) {
+        console.error("Failed to fetch fields", err);
+      } finally {
+        setModuleFieldsLoading(false);
+      }
+    };
+
+    fetchFields();
+  }, [moduleName]);
 
   const handleAddField = () => {
     setFields((prev) => [...prev, createField()]);
@@ -91,12 +177,69 @@ function TemplateEditorDialog({ open, onClose }) {
     );
   };
 
+  const handleSubmit = async () => {
+    const newErrors = {};
+    if (!templateName.trim())
+      newErrors.templateName = "Template name is required.";
+    if (!moduleName) newErrors.moduleName = "Module name is required.";
+    if (!passwordField) newErrors.passwordField = "Password field is required.";
+    if (!workdriveFolder)
+      newErrors.workdriveFolder = "Workdrive folder ID field is required.";
+    if (fields.some((f) => !f.name.trim()))
+      newErrors.fieldNames =
+        "All document requirement fields must have a name.";
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    const recordData = {
+      Name: templateName,
+      Module_Name: moduleName?.label,
+      Password_Field: passwordField?.label,
+      Workdrive_Folder_ID_FIeld: workdriveFolder?.label,
+      Status: "Active",
+      Template_JSON: {
+        templateName,
+        moduleName,
+        passwordField,
+        workdriveFolder,
+        documentRequirements: fields,
+      },
+    };
+
+    if (isEditMode) {
+      const updatedResp = await ZOHO.CRM.API.updateRecord({
+        Entity: "Document_Templates",
+        APIData: { id: editRecord.id, ...recordData },
+        Trigger: ["workflow"],
+      });
+      if (updatedResp?.data?.[0]?.code === "SUCCESS") {
+        handleClose();
+        onTemplateCreated();
+      }
+    } else {
+      const createdResp = await ZOHO.CRM.API.insertRecord({
+        Entity: "Document_Templates",
+        APIData: recordData,
+        Trigger: ["workflow"],
+      });
+      if (createdResp?.data?.[0]?.code === "SUCCESS") {
+        handleClose();
+        onTemplateCreated();
+      }
+    }
+  };
+
   const handleClose = () => {
     setTemplateName("");
     setModuleName(null);
     setPasswordField(null);
     setWorkdriveFolder(null);
     setFields([createField()]);
+    setErrors({});
+    pendingFieldsRef.current = null;
     onClose();
   };
 
@@ -104,7 +247,7 @@ function TemplateEditorDialog({ open, onClose }) {
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ pb: 1 }}>
         <Typography variant="h6" fontWeight={700}>
-          Checklist Template Editor
+          {isEditMode ? "Edit Checklist Template" : "Checklist Template Editor"}
         </Typography>
       </DialogTitle>
 
@@ -116,9 +259,14 @@ function TemplateEditorDialog({ open, onClose }) {
         <TextField
           fullWidth
           size="small"
-          placeholder="Example: Canada Student Visa"
+          placeholder="Put a Name here"
           value={templateName}
-          onChange={(e) => setTemplateName(e.target.value)}
+          onChange={(e) => {
+            setTemplateName(e.target.value);
+            setErrors((p) => ({ ...p, templateName: undefined }));
+          }}
+          error={!!errors.templateName}
+          helperText={errors.templateName}
           sx={{ mt: 0.5, mb: 1 }}
         />
 
@@ -129,7 +277,10 @@ function TemplateEditorDialog({ open, onClose }) {
         <Autocomplete
           options={modules}
           value={moduleName}
-          onChange={(_, val) => setModuleName(val)}
+          onChange={(_, val) => {
+            setModuleName(val);
+            setErrors((p) => ({ ...p, moduleName: undefined }));
+          }}
           loading={modulesLoading}
           isOptionEqualToValue={(option, val) => option.value === val.value}
           size="small"
@@ -137,6 +288,8 @@ function TemplateEditorDialog({ open, onClose }) {
             <TextField
               {...params}
               placeholder="Select a module"
+              error={!!errors.moduleName}
+              helperText={errors.moduleName}
               sx={{ mt: 0.5, mb: 1 }}
             />
           )}
@@ -147,14 +300,24 @@ function TemplateEditorDialog({ open, onClose }) {
           Password Field
         </Typography>
         <Autocomplete
-          options={PASSWORD_FIELD_OPTIONS}
+          options={moduleFields.filter((f) => f.value !== workdriveFolder?.value)}
           value={passwordField}
-          onChange={(_, val) => setPasswordField(val)}
+          onChange={(_, val) => {
+            setPasswordField(val);
+            setErrors((p) => ({ ...p, passwordField: undefined }));
+          }}
+          loading={moduleFieldsLoading}
+          disabled={!moduleName}
+          isOptionEqualToValue={(option, val) => option.value === val.value}
           size="small"
           renderInput={(params) => (
             <TextField
               {...params}
-              placeholder="Select a password field"
+              placeholder={
+                moduleName ? "Select a password field" : "Select a module first"
+              }
+              error={!!errors.passwordField}
+              helperText={errors.passwordField}
               sx={{ mt: 0.5, mb: 1 }}
             />
           )}
@@ -165,14 +328,26 @@ function TemplateEditorDialog({ open, onClose }) {
           Workdrive Folder ID Field
         </Typography>
         <Autocomplete
-          options={WORKDRIVE_FOLDER_OPTIONS}
+          options={moduleFields.filter((f) => f.value !== passwordField?.value)}
           value={workdriveFolder}
-          onChange={(_, val) => setWorkdriveFolder(val)}
+          onChange={(_, val) => {
+            setWorkdriveFolder(val);
+            setErrors((p) => ({ ...p, workdriveFolder: undefined }));
+          }}
+          loading={moduleFieldsLoading}
+          disabled={!moduleName}
+          isOptionEqualToValue={(option, val) => option.value === val.value}
           size="small"
           renderInput={(params) => (
             <TextField
               {...params}
-              placeholder="Select a folder ID field"
+              placeholder={
+                moduleName
+                  ? "Select a folder ID field"
+                  : "Select a module first"
+              }
+              error={!!errors.workdriveFolder}
+              helperText={errors.workdriveFolder}
               sx={{ mt: 0.5, mb: 2 }}
             />
           )}
@@ -191,7 +366,7 @@ function TemplateEditorDialog({ open, onClose }) {
                 display: "flex",
                 alignItems: "center",
                 gap: 1,
-                border: "1px solid #e0e4ea",
+                border: `1px solid ${errors.fieldNames && !field.name.trim() ? "#e53935" : "#e0e4ea"}`,
                 borderRadius: 1.5,
                 px: 1,
                 py: 0.5,
@@ -210,9 +385,10 @@ function TemplateEditorDialog({ open, onClose }) {
                 variant="standard"
                 placeholder="Field name"
                 value={field.name}
-                onChange={(e) =>
-                  handleFieldChange(field.id, "name", e.target.value)
-                }
+                onChange={(e) => {
+                  handleFieldChange(field.id, "name", e.target.value);
+                  setErrors((p) => ({ ...p, fieldNames: undefined }));
+                }}
                 size="small"
                 InputProps={{ disableUnderline: true }}
                 sx={{ flex: 1 }}
@@ -278,13 +454,14 @@ function TemplateEditorDialog({ open, onClose }) {
         </Button>
         <Button
           variant="contained"
+          onClick={handleSubmit}
           sx={{
             textTransform: "none",
             bgcolor: "#2d60c4",
             "&:hover": { bgcolor: "#1b3a6b" },
           }}
         >
-          Save Template
+          {isEditMode ? "Update Template" : "Save Template"}
         </Button>
       </DialogActions>
     </Dialog>

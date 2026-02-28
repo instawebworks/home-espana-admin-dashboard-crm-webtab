@@ -2,15 +2,25 @@ import {
   Box,
   Typography,
   Button,
+  IconButton,
   TableContainer,
   Table,
   TableHead,
   TableBody,
   TableRow,
   TableCell,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  CircularProgress,
 } from "@mui/material";
 import { useState } from "react";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
 import TemplateEditorDialog from "../components/TemplateEditorDialog";
+
+const ZOHO = window.ZOHO;
 
 const COLUMNS = [
   { label: "Name", key: "Name" },
@@ -22,7 +32,6 @@ const COLUMNS = [
 ];
 
 function formatCell(key, value) {
-  if (key === "Owner") return value?.name ?? "—";
   if (key === "Modified_Time" && value)
     return new Date(value).toLocaleString("en-GB", {
       day: "2-digit",
@@ -35,8 +44,39 @@ function formatCell(key, value) {
   return value ?? "—";
 }
 
-function Templates({ documentTemplates }) {
+function Templates({ documentTemplates, onTemplateCreated }) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editRecord, setEditRecord] = useState(null);
+  const [deleteRecord, setDeleteRecord] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const handleEditClick = (row) => {
+    setEditRecord(row);
+    setDialogOpen(true);
+  };
+
+  const handleDialogClose = () => {
+    setDialogOpen(false);
+    setEditRecord(null);
+  };
+
+  const handleDeleteConfirm = async () => {
+    setDeleteLoading(true);
+    try {
+      const resp = await ZOHO.CRM.API.deleteRecord({
+        Entity: "Document_Templates",
+        RecordID: deleteRecord.id,
+      });
+      if (resp?.data?.[0]?.code === "SUCCESS") {
+        setDeleteRecord(null);
+        onTemplateCreated(); // refresh the list
+      }
+    } catch (err) {
+      console.error("Failed to delete record", err);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   return (
     <Box
@@ -47,15 +87,26 @@ function Templates({ documentTemplates }) {
         boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
       }}
     >
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 0.5 }}>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          mb: 0.5,
+        }}
+      >
         <Typography variant="h6" fontWeight={600}>
           Templates
         </Typography>
         <Button
           variant="contained"
           size="small"
-          onClick={() => setDialogOpen(true)}
-          sx={{ bgcolor: "#1b3a6b", "&:hover": { bgcolor: "#15306a" }, textTransform: "none" }}
+          onClick={() => { setEditRecord(null); setDialogOpen(true); }}
+          sx={{
+            bgcolor: "#1b3a6b",
+            "&:hover": { bgcolor: "#15306a" },
+            textTransform: "none",
+          }}
         >
           + Add New Template
         </Button>
@@ -84,6 +135,17 @@ function Templates({ documentTemplates }) {
                   {col.label}
                 </TableCell>
               ))}
+              <TableCell
+                sx={{
+                  bgcolor: "#f5f7fa",
+                  fontWeight: 600,
+                  color: "#1b3a6b",
+                  borderBottom: "2px solid #e0e4ea",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Actions
+              </TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -102,12 +164,30 @@ function Templates({ documentTemplates }) {
                       {formatCell(col.key, row[col.key])}
                     </TableCell>
                   ))}
+                  <TableCell sx={{ whiteSpace: "nowrap" }}>
+                    <IconButton
+                      size="small"
+                      onClick={() => handleEditClick(row)}
+                      sx={{ color: "#2d60c4" }}
+                      title="Edit"
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      onClick={() => setDeleteRecord(row)}
+                      sx={{ color: "#e53935", ml: 0.5 }}
+                      title="Delete"
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={COLUMNS.length}
+                  colSpan={COLUMNS.length + 1}
                   align="center"
                   sx={{ py: 4, color: "text.secondary" }}
                 >
@@ -119,7 +199,55 @@ function Templates({ documentTemplates }) {
         </Table>
       </TableContainer>
 
-      <TemplateEditorDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={!!deleteRecord}
+        onClose={() => !deleteLoading && setDeleteRecord(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 700 }}>Delete Template</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            Are you sure you want to delete{" "}
+            <strong>{deleteRecord?.Name}</strong>? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2, gap: 1 }}>
+          <Button
+            variant="outlined"
+            onClick={() => setDeleteRecord(null)}
+            disabled={deleteLoading}
+            sx={{ textTransform: "none", borderColor: "#c0c8d8", color: "#333" }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleDeleteConfirm}
+            disabled={deleteLoading}
+            sx={{
+              textTransform: "none",
+              bgcolor: "#e53935",
+              "&:hover": { bgcolor: "#c62828" },
+              minWidth: 100,
+            }}
+          >
+            {deleteLoading ? (
+              <CircularProgress size={18} sx={{ color: "white" }} />
+            ) : (
+              "Delete"
+            )}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <TemplateEditorDialog
+        open={dialogOpen}
+        onClose={handleDialogClose}
+        onTemplateCreated={onTemplateCreated}
+        editRecord={editRecord}
+      />
     </Box>
   );
 }

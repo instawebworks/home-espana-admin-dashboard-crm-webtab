@@ -1,4 +1,4 @@
-import { Box, Typography } from "@mui/material";
+import { Box } from "@mui/material";
 import { useEffect, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
@@ -21,19 +21,19 @@ function App() {
     ZOHO.embeddedApp.init();
   }, []);
 
+  const fetchTemplates = async () => {
+    const existingTemplatesResp = await ZOHO.CRM.API.getAllRecords({
+      Entity: "Document_Templates",
+      sort_order: "asc",
+      per_page: 200,
+      page: 1,
+    });
+    setDocumentTemplates(existingTemplatesResp?.data);
+  };
+
   useEffect(() => {
     if (initialized) {
-      const fetchData = async () => {
-        const existingTemplatesResp = await ZOHO.CRM.API.getAllRecords({
-          Entity: "Document_Templates",
-          sort_order: "asc",
-          per_page: 200,
-          page: 1,
-        });
-        setDocumentTemplates(existingTemplatesResp?.data);
-      };
-
-      fetchData();
+      fetchTemplates();
     }
   }, [initialized]);
 
@@ -42,7 +42,12 @@ function App() {
       case "Dashboard":
         return <Dashboard />;
       case "Templates":
-        return <Templates documentTemplates={documentTemplates} />;
+        return (
+          <Templates
+            documentTemplates={documentTemplates}
+            onTemplateCreated={fetchTemplates}
+          />
+        );
       case "Admins":
         return <Admins />;
       default:
