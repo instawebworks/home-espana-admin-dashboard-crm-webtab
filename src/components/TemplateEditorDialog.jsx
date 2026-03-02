@@ -519,7 +519,7 @@ function TemplateEditorDialog({
                 </Select>
               </Box>
 
-              {/* Line 3: additional instructions */}
+              {/* Line 3: additional instructions => */}
               <Box sx={{ mt: 1, px: 1.5 }}>
                 <TextField
                   multiline
