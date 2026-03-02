@@ -49,6 +49,7 @@ function createField() {
     requirement: "Required",
     fileTypes: [],
     uploadCount: 1,
+    additionalInstructions: "",
   };
 }
 
@@ -516,6 +517,25 @@ function TemplateEditorDialog({
                     </MenuItem>
                   ))}
                 </Select>
+              </Box>
+
+              {/* Line 3: additional instructions */}
+              <Box sx={{ mt: 1, px: 1.5 }}>
+                <TextField
+                  multiline
+                  minRows={2}
+                  fullWidth
+                  size="small"
+                  placeholder="Additional Instructions for this Document"
+                  value={field.additionalInstructions ?? ""}
+                  onChange={(e) =>
+                    handleFieldChange(
+                      field.id,
+                      "additionalInstructions",
+                      e.target.value,
+                    )
+                  }
+                />
               </Box>
             </Box>
           ))}
