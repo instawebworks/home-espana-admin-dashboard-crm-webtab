@@ -22,10 +22,13 @@ import TemplateEditorDialog from "../components/TemplateEditorDialog";
 
 const ZOHO = window.ZOHO;
 
+const CRM_RECORD_BASE =
+  "https://crm.zoho.eu/crm/org20080353658/tab/CustomModule20/";
+
 const COLUMNS = [
   { label: "Name", key: "Name" },
   { label: "Module", key: "Module_Name" },
-  { label: "Status", key: "Status" },
+  { label: "Status", key: "Template_Status" },
   { label: "Password Field", key: "Password_Field" },
   { label: "Workdrive Folder ID Field", key: "Workdrive_Folder_ID_FIeld" },
   { label: "Modified Time", key: "Modified_Time" },
@@ -40,6 +43,7 @@ function formatCell(key, value) {
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
+      timeZone: "Europe/Madrid",
     });
   return value ?? "—";
 }
@@ -101,7 +105,10 @@ function Templates({ documentTemplates, onTemplateCreated }) {
         <Button
           variant="contained"
           size="small"
-          onClick={() => { setEditRecord(null); setDialogOpen(true); }}
+          onClick={() => {
+            setEditRecord(null);
+            setDialogOpen(true);
+          }}
           sx={{
             bgcolor: "#1b3a6b",
             "&:hover": { bgcolor: "#15306a" },
@@ -161,7 +168,24 @@ function Templates({ documentTemplates, onTemplateCreated }) {
                       key={col.key}
                       sx={{ color: "#333", whiteSpace: "nowrap" }}
                     >
-                      {formatCell(col.key, row[col.key])}
+                      {col.key === "Name" ? (
+                        <a
+                          href={`${CRM_RECORD_BASE}${row.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "#2d60c4", textDecoration: "none" }}
+                          onMouseEnter={(e) =>
+                            (e.target.style.textDecoration = "underline")
+                          }
+                          onMouseLeave={(e) =>
+                            (e.target.style.textDecoration = "none")
+                          }
+                        >
+                          {row.Name ?? "—"}
+                        </a>
+                      ) : (
+                        formatCell(col.key, row[col.key])
+                      )}
                     </TableCell>
                   ))}
                   <TableCell sx={{ whiteSpace: "nowrap" }}>
@@ -218,7 +242,11 @@ function Templates({ documentTemplates, onTemplateCreated }) {
             variant="outlined"
             onClick={() => setDeleteRecord(null)}
             disabled={deleteLoading}
-            sx={{ textTransform: "none", borderColor: "#c0c8d8", color: "#333" }}
+            sx={{
+              textTransform: "none",
+              borderColor: "#c0c8d8",
+              color: "#333",
+            }}
           >
             Cancel
           </Button>

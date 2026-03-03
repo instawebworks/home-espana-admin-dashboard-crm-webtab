@@ -216,7 +216,7 @@ function TemplateEditorDialog({
       Module_Name: moduleName?.label,
       Password_Field: passwordField?.label,
       Workdrive_Folder_ID_FIeld: workdriveFolder?.label,
-      Status: "Active",
+      Template_Status: "Active",
       Template_JSON: {
         templateName,
         moduleName,
