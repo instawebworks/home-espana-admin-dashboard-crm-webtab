@@ -73,7 +73,7 @@ function Templates({ documentTemplates, onTemplateCreated }) {
       });
       if (resp?.data?.[0]?.code === "SUCCESS") {
         setDeleteRecord(null);
-        onTemplateCreated(); // refresh the list
+        onTemplateCreated(); // refresh the list -
       }
     } catch (err) {
       console.error("Failed to delete record", err);
