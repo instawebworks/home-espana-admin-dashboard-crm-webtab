@@ -10,6 +10,7 @@ const ZOHO = window.ZOHO;
 function App() {
   const [initialized, setInitialized] = useState(false); // initialize the widget
   const [documentTemplates, setDocumentTemplates] = useState(null); // keeps all the templates of Templates module
+  const [submissionLogs, setSubmissionLogs] = useState(null); // keeps all the submission logs
   const [activePage, setActivePage] = useState("Templates");
 
   useEffect(() => {
@@ -31,9 +32,20 @@ function App() {
     setDocumentTemplates(existingTemplatesResp?.data);
   };
 
+  const fetchSubmissionLogs = async () => {
+    const resp = await ZOHO.CRM.API.getAllRecords({
+      Entity: "Submission_Logs",
+      sort_order: "desc",
+      per_page: 200,
+      page: 1,
+    });
+    setSubmissionLogs(resp?.data);
+  };
+
   useEffect(() => {
     if (initialized) {
       fetchTemplates();
+      fetchSubmissionLogs();
     }
   }, [initialized]);
 
@@ -49,14 +61,14 @@ function App() {
           />
         );
       case "Admins":
-        return <Admins />;
+        return <Admins submissionLogs={submissionLogs} onRefresh={fetchSubmissionLogs} />;
       default:
         return null;
     }
   };
 
   return (
-    <Box sx={{ display: "flex", bgcolor: "#eef1f6" }}>
+    <Box sx={{ display: "flex", bgcolor: "#eef1f6", height: "100vh", overflow: "hidden" }}>
       <Sidebar activePage={activePage} onNavigate={setActivePage} />
 
       <Box
@@ -64,11 +76,14 @@ function App() {
           flex: 1,
           display: "flex",
           flexDirection: "column",
-          overflow: "auto",
+          overflow: "hidden",
+          height: "100%",
         }}
       >
         {/* Page content */}
-        <Box sx={{ p: 2 }}>{renderPage()}</Box>
+        <Box sx={{ p: 2, flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
+          {renderPage()}
+        </Box>
       </Box>
     </Box>
   );
