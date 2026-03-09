@@ -137,7 +137,7 @@ function ReviewDocumentDialog({
       return;
     }
 
-    // PDFs: fetch binary via CONNECTION and convert to data URL
+    // PDFs: fetch binary via CONNECTION and convert to data URL =>
     if (!isPdf) return;
 
     setDocLoading(true);
