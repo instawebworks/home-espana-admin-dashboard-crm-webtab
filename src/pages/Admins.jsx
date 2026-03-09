@@ -10,10 +10,18 @@ import {
   Button,
   Collapse,
   CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  TextField,
+  IconButton,
 } from "@mui/material";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import CloseIcon from "@mui/icons-material/Close";
+import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
 
 const ZOHO = window.ZOHO;
+const ZOHO_BASE = "https://crm.zoho.eu";
 
 const COLUMNS = [
   { label: "Client Name", key: "Client_Name" },
@@ -32,14 +40,18 @@ const UPLOAD_COLUMNS = [
 ];
 
 const STATUS_STYLES = {
-  Pending:  { bg: "#fff8e1", color: "#b45309", border: "#fde68a" },
+  Pending: { bg: "#fff8e1", color: "#b45309", border: "#fde68a" },
   Approved: { bg: "#ecfdf5", color: "#065f46", border: "#6ee7b7" },
   Rejected: { bg: "#fff1f2", color: "#9f1239", border: "#fecdd3" },
-  Missing:  { bg: "#fff1f2", color: "#9f1239", border: "#fecdd3" },
+  Missing: { bg: "#fff1f2", color: "#9f1239", border: "#fecdd3" },
 };
 
 function StatusBadge({ status }) {
-  const style = STATUS_STYLES[status] ?? { bg: "#f3f4f6", color: "#374151", border: "#d1d5db" };
+  const style = STATUS_STYLES[status] ?? {
+    bg: "#f3f4f6",
+    color: "#374151",
+    border: "#d1d5db",
+  };
   return (
     <Box
       component="span"
@@ -82,40 +94,409 @@ function formatCell(key, row) {
   return row[key] ?? "—";
 }
 
+// ─── Review Document Dialog ────────────────────────────────────────────────
+
+const CONNECTION = "zoho_crm_conn_used_in_widget_do_not_delete";
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "heic"]);
+const OFFICE_EXTS = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx"]);
+
+function ReviewDocumentDialog({
+  open,
+  onClose,
+  upload,
+  parentRow,
+  allUploads,
+  attachment,
+  onStatusUpdate,
+}) {
+  const [docUrl, setDocUrl] = useState(null);
+  const [docLoading, setDocLoading] = useState(false);
+
+  const [comment, setComment] = useState("");
+  const [commentError, setCommentError] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const ext = upload?.Document_Name?.split(".").pop()?.toLowerCase() ?? "";
+  const isImage = IMAGE_EXTS.has(ext);
+  const isPdf = ext === "pdf";
+
+  useEffect(() => {
+    if (open) {
+      setComment("");
+      setCommentError(false);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !upload?.Attachment_ID || !parentRow?.id) return;
+    setDocUrl(null);
+
+    // Images: thumbnailUrl is already in the attachment data — no fetch needed
+    if (isImage) {
+      if (attachment?.thumbnailUrl) setDocUrl(attachment.thumbnailUrl);
+      return;
+    }
+
+    // PDFs: fetch binary via CONNECTION and convert to data URL
+    if (!isPdf) return;
+
+    setDocLoading(true);
+    const fetchPdf = async () => {
+      try {
+        const resp = await ZOHO.CRM.CONNECTION.invoke(CONNECTION, {
+          url: `https://www.zohoapis.eu/crm/v8/Submission_Logs/${parentRow.id}/Attachments/${upload.Attachment_ID}`,
+          method: "GET",
+          param_type: 1,
+        });
+        const content = resp?.details?.statusMessage;
+        if (!content || typeof content !== "string") return;
+        // Mask each char to 0–255 so btoa() won't throw on high bytes
+        let binaryStr = "";
+        for (let i = 0; i < content.length; i++) {
+          binaryStr += String.fromCharCode(content.charCodeAt(i) & 0xff);
+        }
+        setDocUrl(`data:application/pdf;base64,${btoa(binaryStr)}`);
+      } catch (err) {
+        console.error("[DocPreview] PDF fetch failed", err);
+      } finally {
+        setDocLoading(false);
+      }
+    };
+    fetchPdf();
+    return () => setDocUrl(null);
+  }, [open, upload, parentRow, attachment, isImage, isPdf]);
+
+  const previewUrl = attachment?.$previewUrl
+    ? `${ZOHO_BASE}${attachment.$previewUrl}`
+    : null;
+
+  const renderPreview = () => {
+    if (docLoading)
+      return <CircularProgress size={28} sx={{ color: "#1b3a6b" }} />;
+    if (docUrl) {
+      if (isImage)
+        return (
+          <img
+            src={docUrl}
+            alt={upload?.Document_Name}
+            style={{
+              maxWidth: "100%",
+              maxHeight: 280,
+              objectFit: "contain",
+              borderRadius: 4,
+            }}
+          />
+        );
+      if (isPdf)
+        return (
+          <object
+            data={docUrl}
+            type="application/pdf"
+            width="100%"
+            height="300"
+            style={{ display: "block" }}
+          >
+            PDF could not be displayed.
+          </object>
+        );
+    }
+    if (OFFICE_EXTS.has(ext))
+      return (
+        <>
+          <InsertDriveFileOutlinedIcon
+            sx={{ fontSize: 48, color: "#9ca3af" }}
+          />
+          <Typography variant="body2" color="text.secondary" textAlign="center">
+            Word and Excel documents can be previewed through CRM Record only.
+            Open the CRM record to preview this document.
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => {
+              const org =
+                attachment?.$previewUrl?.match(/\/crm\/(org\d+)\//)?.[1];
+              const mod =
+                attachment?.$previewUrl?.match(/[?&]module=([^&]+)/)?.[1];
+              if (org && mod)
+                window.open(
+                  `${ZOHO_BASE}/crm/${org}/tab/${mod}/${parentRow.id}`,
+                  "_blank",
+                );
+            }}
+            sx={{
+              textTransform: "none",
+              fontSize: 12,
+              borderColor: "#1b3a6b",
+              color: "#1b3a6b",
+              "&:hover": { bgcolor: "#1b3a6b", color: "white" },
+            }}
+          >
+            View in CRM Record ↗
+          </Button>
+        </>
+      );
+    return (
+      <>
+        <InsertDriveFileOutlinedIcon sx={{ fontSize: 48, color: "#9ca3af" }} />
+        <Typography variant="body2" color="text.secondary">
+          Preview not available.
+        </Typography>
+      </>
+    );
+  };
+
+  const handleAction = async (status) => {
+    if (status === "Rejected" && !comment.trim()) {
+      setCommentError(true);
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const allRows = (allUploads ?? []).map((u) => {
+        if (u.id !== upload.id) return { id: u.id };
+        const row = { id: u.id, Approval_Status: status };
+        if (comment.trim()) row.Admin_Comment = comment.trim();
+        return row;
+      });
+
+      const resp = await ZOHO.CRM.API.updateRecord({
+        Entity: "Submission_Logs",
+        APIData: { id: parentRow.id, Document_Uploads: allRows },
+        Trigger: [],
+      });
+
+      if (resp?.data?.[0]?.code === "SUCCESS") {
+        onStatusUpdate(parentRow.id, upload.id, status, comment.trim());
+        onClose();
+      }
+    } catch (err) {
+      console.error("Failed to update approval status", err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onClose={() => !actionLoading && onClose()}
+      maxWidth="sm"
+      fullWidth
+    >
+      <DialogTitle
+        sx={{
+          fontWeight: 700,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          pb: 1,
+        }}
+      >
+        Review Document
+        <IconButton size="small" onClick={onClose} disabled={actionLoading}>
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent sx={{ pt: 0 }}>
+        {/* File name bar */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            px: 1.5,
+            py: 1.25,
+            bgcolor: "#f5f7fa",
+            borderRadius: 1,
+            mb: 2,
+            border: "1px solid #e0e4ea",
+          }}
+        >
+          <InsertDriveFileOutlinedIcon
+            sx={{ color: "#1b3a6b", fontSize: 20 }}
+          />
+          <Typography fontWeight={600} fontSize={14} noWrap>
+            {upload?.Document_Name ?? "—"}
+          </Typography>
+        </Box>
+
+        {/* Document preview */}
+        <Box
+          sx={{
+            border: "1px solid #e0e4ea",
+            borderRadius: 1,
+            mb: 1.5,
+            minHeight: 180,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            bgcolor: "#f5f7fa",
+            p: 2,
+            gap: 1.5,
+          }}
+        >
+          {renderPreview()}
+          {previewUrl && !OFFICE_EXTS.has(ext) && (
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => window.open(previewUrl, "_blank")}
+              sx={{
+                textTransform: "none",
+                fontSize: 12,
+                borderColor: "#1b3a6b",
+                color: "#1b3a6b",
+                "&:hover": { bgcolor: "#1b3a6b", color: "white" },
+              }}
+            >
+              Open Full Preview ↗
+            </Button>
+          )}
+        </Box>
+
+        {/* Comment field */}
+        <Typography variant="caption" color="text.secondary" fontWeight={600}>
+          Comment to Client
+        </Typography>
+        <TextField
+          multiline
+          minRows={3}
+          fullWidth
+          size="small"
+          placeholder="Add correction note for resubmission, if rejecting..."
+          value={comment}
+          onChange={(e) => {
+            setComment(e.target.value);
+            setCommentError(false);
+          }}
+          error={commentError}
+          helperText={
+            commentError
+              ? "A comment is required when rejecting a document."
+              : ""
+          }
+          sx={{ mt: 0.5, mb: 2 }}
+        />
+
+        {/* Approve / Reject buttons */}
+        <Box sx={{ display: "flex", gap: 1.5 }}>
+          <Button
+            fullWidth
+            variant="contained"
+            disabled={actionLoading}
+            onClick={() => handleAction("Approved")}
+            sx={{
+              bgcolor: "#16a34a",
+              "&:hover": { bgcolor: "#15803d" },
+              textTransform: "none",
+              fontWeight: 700,
+            }}
+          >
+            {actionLoading ? (
+              <CircularProgress size={18} sx={{ color: "white" }} />
+            ) : (
+              "Approve"
+            )}
+          </Button>
+          <Button
+            fullWidth
+            variant="contained"
+            disabled={actionLoading}
+            onClick={() => handleAction("Rejected")}
+            sx={{
+              bgcolor: "#dc2626",
+              "&:hover": { bgcolor: "#b91c1c" },
+              textTransform: "none",
+              fontWeight: 700,
+            }}
+          >
+            {actionLoading ? (
+              <CircularProgress size={18} sx={{ color: "white" }} />
+            ) : (
+              "Reject"
+            )}
+          </Button>
+        </Box>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", mt: 1 }}
+        >
+          Reject with a clear comment so the client can rectify and re-submit.
+        </Typography>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Main Admins Page ──────────────────────────────────────────────────────
+
 function Admins({ submissionLogs, onRefresh }) {
   const [expandedId, setExpandedId] = useState(null);
-  const [uploadsCache, setUploadsCache] = useState({});
+  const [uploadsCache, setUploadsCache] = useState({}); // { recordId: upload[] }
+  const [attachmentsCache, setAttachmentsCache] = useState({}); // { recordId: { attachmentId: attachment } }
   const [loadingId, setLoadingId] = useState(null);
+  const [reviewDialog, setReviewDialog] = useState(null); // { upload, parentRow, attachment }
 
   const handleToggle = async (row) => {
-    // Collapse if already open
     if (expandedId === row.id) {
       setExpandedId(null);
       return;
     }
-
     setExpandedId(row.id);
-
-    // Use cache if already fetched
     if (uploadsCache[row.id]) return;
-
     setLoadingId(row.id);
     try {
-      const resp = await ZOHO.CRM.API.getRecord({
-        Entity: "Submission_Logs",
-        RecordID: row.id,
+      // Fetch subform uploads and CRM attachments in parallel
+      const [recordResp, attachResp] = await Promise.all([
+        ZOHO.CRM.API.getRecord({ Entity: "Submission_Logs", RecordID: row.id }),
+        ZOHO.CRM.API.getRelatedRecords({
+          Entity: "Submission_Logs",
+          RecordID: row.id,
+          RelatedList: "Attachments",
+          page: 1,
+          per_page: 200,
+        }),
+      ]);
+
+      const uploads = recordResp?.data?.[0]?.Document_Uploads ?? [];
+
+      // Build a map: attachment id → attachment object
+      const attachMap = {};
+      (attachResp?.data ?? []).forEach((a) => {
+        attachMap[a.id] = a;
       });
-      const data = resp?.data?.[0];
-      setUploadsCache((prev) => ({ ...prev, [row.id]: data?.Document_Uploads ?? [] }));
+
+      setUploadsCache((prev) => ({ ...prev, [row.id]: uploads }));
+      setAttachmentsCache((prev) => ({ ...prev, [row.id]: attachMap }));
     } catch (err) {
-      console.error("Failed to fetch record", err);
+      console.error("Failed to fetch record data", err);
       setUploadsCache((prev) => ({ ...prev, [row.id]: [] }));
     } finally {
       setLoadingId(null);
     }
   };
 
-  const totalCols = COLUMNS.length + 1; // +1 for Actions column
+  const handleStatusUpdate = (parentId, uploadId, status, comment) => {
+    setUploadsCache((prev) => ({
+      ...prev,
+      [parentId]: (prev[parentId] ?? []).map((u) =>
+        u.id === uploadId
+          ? {
+              ...u,
+              Approval_Status: status,
+              ...(comment && { Admin_Comment: comment }),
+            }
+          : u,
+      ),
+    }));
+  };
+
+  const totalCols = COLUMNS.length + 1;
 
   return (
     <Box
@@ -138,7 +519,12 @@ function Admins({ submissionLogs, onRefresh }) {
       </Typography>
 
       <TableContainer
-        sx={{ flex: 1, overflow: "auto", border: "1px solid #e0e4ea", borderRadius: 1 }}
+        sx={{
+          flex: 1,
+          overflow: "auto",
+          border: "1px solid #e0e4ea",
+          borderRadius: 1,
+        }}
       >
         <Table stickyHeader size="small">
           <TableHead>
@@ -176,10 +562,10 @@ function Admins({ submissionLogs, onRefresh }) {
                 const isOpen = expandedId === row.id;
                 const isLoading = loadingId === row.id;
                 const uploads = uploadsCache[row.id] ?? [];
+                const attachMap = attachmentsCache[row.id] ?? {};
 
                 return (
                   <>
-                    {/* Main row */}
                     <TableRow key={row.id} hover>
                       {COLUMNS.map((col) => (
                         <TableCell
@@ -193,7 +579,12 @@ function Admins({ submissionLogs, onRefresh }) {
                           {formatCell(col.key, row)}
                         </TableCell>
                       ))}
-                      <TableCell sx={{ borderBottom: isOpen ? 0 : "1px solid #e0e4ea", whiteSpace: "nowrap" }}>
+                      <TableCell
+                        sx={{
+                          borderBottom: isOpen ? 0 : "1px solid #e0e4ea",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
                         <Button
                           size="small"
                           variant={isOpen ? "contained" : "outlined"}
@@ -212,22 +603,39 @@ function Admins({ submissionLogs, onRefresh }) {
                       </TableCell>
                     </TableRow>
 
-                    {/* Expandable sub-row */}
                     <TableRow key={`${row.id}-expand`}>
                       <TableCell
                         colSpan={totalCols}
-                        sx={{ p: 0, borderBottom: isOpen ? "2px solid #e0e4ea" : 0 }}
+                        sx={{
+                          p: 0,
+                          borderBottom: isOpen ? "2px solid #e0e4ea" : 0,
+                        }}
                       >
                         <Collapse in={isOpen} timeout="auto" unmountOnExit>
                           <Box sx={{ bgcolor: "#f9fafb", px: 3, py: 2 }}>
                             {isLoading ? (
-                              <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
-                                <CircularProgress size={24} sx={{ color: "#1b3a6b" }} />
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  justifyContent: "center",
+                                  py: 2,
+                                }}
+                              >
+                                <CircularProgress
+                                  size={24}
+                                  sx={{ color: "#1b3a6b" }}
+                                />
                               </Box>
                             ) : (
                               <Table
                                 size="small"
-                                sx={{ tableLayout: "fixed", width: "100%", bgcolor: "white", borderRadius: 1, overflow: "hidden" }}
+                                sx={{
+                                  tableLayout: "fixed",
+                                  width: "100%",
+                                  bgcolor: "white",
+                                  borderRadius: 1,
+                                  overflow: "hidden",
+                                }}
                               >
                                 <TableHead>
                                   <TableRow>
@@ -265,23 +673,39 @@ function Admins({ submissionLogs, onRefresh }) {
                                             }}
                                           >
                                             {col.key === "Approval_Status" ? (
-                                              <StatusBadge status={upload.Approval_Status} />
+                                              <StatusBadge
+                                                status={upload.Approval_Status}
+                                              />
                                             ) : col.key === "_actions" ? (
                                               <Button
                                                 size="small"
                                                 variant="outlined"
+                                                onClick={() =>
+                                                  setReviewDialog({
+                                                    upload,
+                                                    parentRow: row,
+                                                    allUploads: uploads,
+                                                    attachment:
+                                                      attachMap[
+                                                        upload.Attachment_ID
+                                                      ] ?? null,
+                                                  })
+                                                }
                                                 sx={{
                                                   textTransform: "none",
                                                   fontSize: 12,
                                                   borderColor: "#1b3a6b",
                                                   color: "#1b3a6b",
-                                                  "&:hover": { bgcolor: "#1b3a6b", color: "white" },
+                                                  "&:hover": {
+                                                    bgcolor: "#1b3a6b",
+                                                    color: "white",
+                                                  },
                                                 }}
                                               >
                                                 Review
                                               </Button>
                                             ) : (
-                                              upload[col.key] ?? "—"
+                                              (upload[col.key] ?? "—")
                                             )}
                                           </TableCell>
                                         ))}
@@ -322,6 +746,16 @@ function Admins({ submissionLogs, onRefresh }) {
           </TableBody>
         </Table>
       </TableContainer>
+
+      <ReviewDocumentDialog
+        open={!!reviewDialog}
+        onClose={() => setReviewDialog(null)}
+        upload={reviewDialog?.upload}
+        parentRow={reviewDialog?.parentRow}
+        allUploads={reviewDialog?.allUploads}
+        attachment={reviewDialog?.attachment}
+        onStatusUpdate={handleStatusUpdate}
+      />
     </Box>
   );
 }
