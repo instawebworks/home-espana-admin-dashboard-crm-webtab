@@ -99,7 +99,8 @@ function formatCell(key, row) {
 function formatNoteTime(isoString) {
   const date = new Date(isoString);
   const now = new Date();
-  const toDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const toDay = (d) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const diffDays = Math.round((toDay(now) - toDay(date)) / 86400000);
   const timeStr = date.toLocaleTimeString("en-GB", {
     hour: "2-digit",
@@ -145,7 +146,8 @@ function ReviewDocumentDialog({
   const isImage = IMAGE_EXTS.has(ext);
   const isPdf = ext === "pdf";
   const currentStatus = upload?.Approval_Status;
-  const isDecided = currentStatus === "Approved" || currentStatus === "Rejected";
+  const isDecided =
+    currentStatus === "Approved" || currentStatus === "Rejected";
 
   useEffect(() => {
     if (open) {
@@ -391,7 +393,11 @@ function ReviewDocumentDialog({
         {!isDecided && (
           <>
             {/* Comment field */}
-            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              fontWeight={600}
+            >
               Comment to Client
             </Typography>
             <TextField
@@ -458,7 +464,8 @@ function ReviewDocumentDialog({
               color="text.secondary"
               sx={{ display: "block", mt: 1 }}
             >
-              Reject with a clear comment so the client can rectify and re-submit.
+              Reject with a clear comment so the client can rectify and
+              re-submit.
             </Typography>
           </>
         )}
@@ -488,7 +495,7 @@ function Admins({ submissionLogs, onRefresh }) {
     if (uploadsCache[row.id]) return;
     setLoadingId(row.id);
     try {
-      // Fetch subform uploads, CRM attachments, and notes in parallel
+      // Fetch subform uploads, CRM attachments, and notes in parallel =>
       const [recordResp, attachResp, notesResp] = await Promise.all([
         ZOHO.CRM.API.getRecord({ Entity: "Submission_Logs", RecordID: row.id }),
         ZOHO.CRM.API.getRelatedRecords({
@@ -659,7 +666,9 @@ function Admins({ submissionLogs, onRefresh }) {
                         }}
                       >
                         <Collapse in={isOpen} timeout="auto" unmountOnExit>
-                          <Box sx={{ bgcolor: "#f9fafb", px: 3, pt: 1.5, pb: 2 }}>
+                          <Box
+                            sx={{ bgcolor: "#f9fafb", px: 3, pt: 1.5, pb: 2 }}
+                          >
                             {/* Tabs */}
                             <Tabs
                               value={activeTab}
@@ -684,8 +693,17 @@ function Admins({ submissionLogs, onRefresh }) {
                             </Tabs>
 
                             {isLoading ? (
-                              <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
-                                <CircularProgress size={24} sx={{ color: "#1b3a6b" }} />
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  justifyContent: "center",
+                                  py: 2,
+                                }}
+                              >
+                                <CircularProgress
+                                  size={24}
+                                  sx={{ color: "#1b3a6b" }}
+                                />
                               </Box>
                             ) : activeTab === 0 ? (
                               /* ── User Uploads tab ── */
@@ -735,7 +753,9 @@ function Admins({ submissionLogs, onRefresh }) {
                                             }}
                                           >
                                             {col.key === "Approval_Status" ? (
-                                              <StatusBadge status={upload.Approval_Status} />
+                                              <StatusBadge
+                                                status={upload.Approval_Status}
+                                              />
                                             ) : col.key === "_actions" ? (
                                               <Button
                                                 size="small"
@@ -745,7 +765,10 @@ function Admins({ submissionLogs, onRefresh }) {
                                                     upload,
                                                     parentRow: row,
                                                     allUploads: uploads,
-                                                    attachment: attachMap[upload.Attachment_ID] ?? null,
+                                                    attachment:
+                                                      attachMap[
+                                                        upload.Attachment_ID
+                                                      ] ?? null,
                                                   })
                                                 }
                                                 sx={{
@@ -753,13 +776,16 @@ function Admins({ submissionLogs, onRefresh }) {
                                                   fontSize: 12,
                                                   borderColor: "#1b3a6b",
                                                   color: "#1b3a6b",
-                                                  "&:hover": { bgcolor: "#1b3a6b", color: "white" },
+                                                  "&:hover": {
+                                                    bgcolor: "#1b3a6b",
+                                                    color: "white",
+                                                  },
                                                 }}
                                               >
                                                 Review
                                               </Button>
                                             ) : (
-                                              upload[col.key] ?? "—"
+                                              (upload[col.key] ?? "—")
                                             )}
                                           </TableCell>
                                         ))}
@@ -795,7 +821,14 @@ function Admins({ submissionLogs, onRefresh }) {
                               >
                                 {notes.length ? (
                                   notes.map((note) => (
-                                    <Box key={note.id} sx={{ display: "flex", gap: 1.5, alignItems: "flex-start" }}>
+                                    <Box
+                                      key={note.id}
+                                      sx={{
+                                        display: "flex",
+                                        gap: 1.5,
+                                        alignItems: "flex-start",
+                                      }}
+                                    >
                                       {/* Avatar */}
                                       <Box
                                         sx={{
@@ -813,17 +846,38 @@ function Admins({ submissionLogs, onRefresh }) {
                                           mt: 0.25,
                                         }}
                                       >
-                                        {(row.Client_Name ?? "?")[0].toUpperCase()}
+                                        {(row.Client_Name ??
+                                          "?")[0].toUpperCase()}
                                       </Box>
 
                                       {/* Bubble */}
                                       <Box sx={{ flex: 1, minWidth: 0 }}>
-                                        <Box sx={{ display: "flex", alignItems: "baseline", gap: 1, mb: 0.5 }}>
-                                          <Typography fontWeight={700} fontSize={13} color="#1b3a6b" noWrap>
+                                        <Box
+                                          sx={{
+                                            display: "flex",
+                                            alignItems: "baseline",
+                                            gap: 1,
+                                            mb: 0.5,
+                                          }}
+                                        >
+                                          <Typography
+                                            fontWeight={700}
+                                            fontSize={13}
+                                            color="#1b3a6b"
+                                            noWrap
+                                          >
                                             {row.Client_Name ?? "Unknown"}
                                           </Typography>
-                                          <Typography fontSize={11} color="text.secondary" flexShrink={0}>
-                                            {note.Created_Time ? formatNoteTime(note.Created_Time) : "—"}
+                                          <Typography
+                                            fontSize={11}
+                                            color="text.secondary"
+                                            flexShrink={0}
+                                          >
+                                            {note.Created_Time
+                                              ? formatNoteTime(
+                                                  note.Created_Time,
+                                                )
+                                              : "—"}
                                           </Typography>
                                         </Box>
                                         <Box
@@ -836,11 +890,23 @@ function Admins({ submissionLogs, onRefresh }) {
                                           }}
                                         >
                                           {note.Note_Title && (
-                                            <Typography fontSize={11} fontWeight={700} color="#1b3a6b" mb={0.25}>
+                                            <Typography
+                                              fontSize={11}
+                                              fontWeight={700}
+                                              color="#1b3a6b"
+                                              mb={0.25}
+                                            >
                                               {note.Note_Title}
                                             </Typography>
                                           )}
-                                          <Typography fontSize={13} color="#333" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                          <Typography
+                                            fontSize={13}
+                                            color="#333"
+                                            sx={{
+                                              whiteSpace: "pre-wrap",
+                                              wordBreak: "break-word",
+                                            }}
+                                          >
                                             {note.Note_Content ?? "—"}
                                           </Typography>
                                         </Box>
@@ -848,7 +914,12 @@ function Admins({ submissionLogs, onRefresh }) {
                                     </Box>
                                   ))
                                 ) : (
-                                  <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
+                                  <Typography
+                                    variant="body2"
+                                    color="text.secondary"
+                                    textAlign="center"
+                                    py={2}
+                                  >
                                     No messages found.
                                   </Typography>
                                 )}
