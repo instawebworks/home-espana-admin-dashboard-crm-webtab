@@ -15,6 +15,8 @@ import {
   DialogContent,
   TextField,
   IconButton,
+  Tabs,
+  Tab,
 } from "@mui/material";
 import { useState, useEffect } from "react";
 import CloseIcon from "@mui/icons-material/Close";
@@ -94,6 +96,29 @@ function formatCell(key, row) {
   return row[key] ?? "—";
 }
 
+function formatNoteTime(isoString) {
+  const date = new Date(isoString);
+  const now = new Date();
+  const toDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((toDay(now) - toDay(date)) / 86400000);
+  const timeStr = date.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "Europe/Madrid",
+  });
+  if (diffDays === 0) return `Today at ${timeStr}`;
+  if (diffDays === 1) return `Yesterday at ${timeStr}`;
+  return (
+    date.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "Europe/Madrid",
+    }) + ` at ${timeStr}`
+  );
+}
+
 // ─── Review Document Dialog ────────────────────────────────────────────────
 
 const CONNECTION = "zoho_crm_conn_used_in_widget_do_not_delete";
@@ -119,6 +144,8 @@ function ReviewDocumentDialog({
   const ext = upload?.Document_Name?.split(".").pop()?.toLowerCase() ?? "";
   const isImage = IMAGE_EXTS.has(ext);
   const isPdf = ext === "pdf";
+  const currentStatus = upload?.Approval_Status;
+  const isDecided = currentStatus === "Approved" || currentStatus === "Rejected";
 
   useEffect(() => {
     if (open) {
@@ -293,7 +320,10 @@ function ReviewDocumentDialog({
           pb: 1,
         }}
       >
-        Review Document
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          Review Document
+          {isDecided && <StatusBadge status={currentStatus} />}
+        </Box>
         <IconButton size="small" onClick={onClose} disabled={actionLoading}>
           <CloseIcon fontSize="small" />
         </IconButton>
@@ -358,76 +388,80 @@ function ReviewDocumentDialog({
           )}
         </Box>
 
-        {/* Comment field */}
-        <Typography variant="caption" color="text.secondary" fontWeight={600}>
-          Comment to Client
-        </Typography>
-        <TextField
-          multiline
-          minRows={3}
-          fullWidth
-          size="small"
-          placeholder="Add correction note for resubmission, if rejecting..."
-          value={comment}
-          onChange={(e) => {
-            setComment(e.target.value);
-            setCommentError(false);
-          }}
-          error={commentError}
-          helperText={
-            commentError
-              ? "A comment is required when rejecting a document."
-              : ""
-          }
-          sx={{ mt: 0.5, mb: 2 }}
-        />
+        {!isDecided && (
+          <>
+            {/* Comment field */}
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+              Comment to Client
+            </Typography>
+            <TextField
+              multiline
+              minRows={3}
+              fullWidth
+              size="small"
+              placeholder="Add correction note for resubmission, if rejecting..."
+              value={comment}
+              onChange={(e) => {
+                setComment(e.target.value);
+                setCommentError(false);
+              }}
+              error={commentError}
+              helperText={
+                commentError
+                  ? "A comment is required when rejecting a document."
+                  : ""
+              }
+              sx={{ mt: 0.5, mb: 2 }}
+            />
 
-        {/* Approve / Reject buttons */}
-        <Box sx={{ display: "flex", gap: 1.5 }}>
-          <Button
-            fullWidth
-            variant="contained"
-            disabled={actionLoading}
-            onClick={() => handleAction("Approved")}
-            sx={{
-              bgcolor: "#16a34a",
-              "&:hover": { bgcolor: "#15803d" },
-              textTransform: "none",
-              fontWeight: 700,
-            }}
-          >
-            {actionLoading ? (
-              <CircularProgress size={18} sx={{ color: "white" }} />
-            ) : (
-              "Approve"
-            )}
-          </Button>
-          <Button
-            fullWidth
-            variant="contained"
-            disabled={actionLoading}
-            onClick={() => handleAction("Rejected")}
-            sx={{
-              bgcolor: "#dc2626",
-              "&:hover": { bgcolor: "#b91c1c" },
-              textTransform: "none",
-              fontWeight: 700,
-            }}
-          >
-            {actionLoading ? (
-              <CircularProgress size={18} sx={{ color: "white" }} />
-            ) : (
-              "Reject"
-            )}
-          </Button>
-        </Box>
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ display: "block", mt: 1 }}
-        >
-          Reject with a clear comment so the client can rectify and re-submit.
-        </Typography>
+            {/* Approve / Reject buttons */}
+            <Box sx={{ display: "flex", gap: 1.5 }}>
+              <Button
+                fullWidth
+                variant="contained"
+                disabled={actionLoading}
+                onClick={() => handleAction("Approved")}
+                sx={{
+                  bgcolor: "#16a34a",
+                  "&:hover": { bgcolor: "#15803d" },
+                  textTransform: "none",
+                  fontWeight: 700,
+                }}
+              >
+                {actionLoading ? (
+                  <CircularProgress size={18} sx={{ color: "white" }} />
+                ) : (
+                  "Approve"
+                )}
+              </Button>
+              <Button
+                fullWidth
+                variant="contained"
+                disabled={actionLoading}
+                onClick={() => handleAction("Rejected")}
+                sx={{
+                  bgcolor: "#dc2626",
+                  "&:hover": { bgcolor: "#b91c1c" },
+                  textTransform: "none",
+                  fontWeight: 700,
+                }}
+              >
+                {actionLoading ? (
+                  <CircularProgress size={18} sx={{ color: "white" }} />
+                ) : (
+                  "Reject"
+                )}
+              </Button>
+            </Box>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: "block", mt: 1 }}
+            >
+              Reject with a clear comment so the client can rectify and re-submit.
+            </Typography>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -437,8 +471,10 @@ function ReviewDocumentDialog({
 
 function Admins({ submissionLogs, onRefresh }) {
   const [expandedId, setExpandedId] = useState(null);
+  const [activeTab, setActiveTab] = useState(0);
   const [uploadsCache, setUploadsCache] = useState({}); // { recordId: upload[] }
   const [attachmentsCache, setAttachmentsCache] = useState({}); // { recordId: { attachmentId: attachment } }
+  const [notesCache, setNotesCache] = useState({}); // { recordId: note[] }
   const [loadingId, setLoadingId] = useState(null);
   const [reviewDialog, setReviewDialog] = useState(null); // { upload, parentRow, attachment }
 
@@ -448,16 +484,24 @@ function Admins({ submissionLogs, onRefresh }) {
       return;
     }
     setExpandedId(row.id);
+    setActiveTab(0);
     if (uploadsCache[row.id]) return;
     setLoadingId(row.id);
     try {
-      // Fetch subform uploads and CRM attachments in parallel
-      const [recordResp, attachResp] = await Promise.all([
+      // Fetch subform uploads, CRM attachments, and notes in parallel
+      const [recordResp, attachResp, notesResp] = await Promise.all([
         ZOHO.CRM.API.getRecord({ Entity: "Submission_Logs", RecordID: row.id }),
         ZOHO.CRM.API.getRelatedRecords({
           Entity: "Submission_Logs",
           RecordID: row.id,
           RelatedList: "Attachments",
+          page: 1,
+          per_page: 200,
+        }),
+        ZOHO.CRM.API.getRelatedRecords({
+          Entity: "Submission_Logs",
+          RecordID: row.id,
+          RelatedList: "Notes",
           page: 1,
           per_page: 200,
         }),
@@ -473,9 +517,11 @@ function Admins({ submissionLogs, onRefresh }) {
 
       setUploadsCache((prev) => ({ ...prev, [row.id]: uploads }));
       setAttachmentsCache((prev) => ({ ...prev, [row.id]: attachMap }));
+      setNotesCache((prev) => ({ ...prev, [row.id]: notesResp?.data ?? [] }));
     } catch (err) {
       console.error("Failed to fetch record data", err);
       setUploadsCache((prev) => ({ ...prev, [row.id]: [] }));
+      setNotesCache((prev) => ({ ...prev, [row.id]: [] }));
     } finally {
       setLoadingId(null);
     }
@@ -563,6 +609,7 @@ function Admins({ submissionLogs, onRefresh }) {
                 const isLoading = loadingId === row.id;
                 const uploads = uploadsCache[row.id] ?? [];
                 const attachMap = attachmentsCache[row.id] ?? {};
+                const notes = notesCache[row.id] ?? [];
 
                 return (
                   <>
@@ -612,21 +659,36 @@ function Admins({ submissionLogs, onRefresh }) {
                         }}
                       >
                         <Collapse in={isOpen} timeout="auto" unmountOnExit>
-                          <Box sx={{ bgcolor: "#f9fafb", px: 3, py: 2 }}>
+                          <Box sx={{ bgcolor: "#f9fafb", px: 3, pt: 1.5, pb: 2 }}>
+                            {/* Tabs */}
+                            <Tabs
+                              value={activeTab}
+                              onChange={(_, v) => setActiveTab(v)}
+                              sx={{
+                                mb: 1.5,
+                                minHeight: 36,
+                                "& .MuiTab-root": {
+                                  minHeight: 36,
+                                  textTransform: "none",
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  color: "#6b7280",
+                                  px: 2,
+                                },
+                                "& .Mui-selected": { color: "#1b3a6b" },
+                                "& .MuiTabs-indicator": { bgcolor: "#1b3a6b" },
+                              }}
+                            >
+                              <Tab label="User Uploads" />
+                              <Tab label="User Messages" />
+                            </Tabs>
+
                             {isLoading ? (
-                              <Box
-                                sx={{
-                                  display: "flex",
-                                  justifyContent: "center",
-                                  py: 2,
-                                }}
-                              >
-                                <CircularProgress
-                                  size={24}
-                                  sx={{ color: "#1b3a6b" }}
-                                />
+                              <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
+                                <CircularProgress size={24} sx={{ color: "#1b3a6b" }} />
                               </Box>
-                            ) : (
+                            ) : activeTab === 0 ? (
+                              /* ── User Uploads tab ── */
                               <Table
                                 size="small"
                                 sx={{
@@ -673,9 +735,7 @@ function Admins({ submissionLogs, onRefresh }) {
                                             }}
                                           >
                                             {col.key === "Approval_Status" ? (
-                                              <StatusBadge
-                                                status={upload.Approval_Status}
-                                              />
+                                              <StatusBadge status={upload.Approval_Status} />
                                             ) : col.key === "_actions" ? (
                                               <Button
                                                 size="small"
@@ -685,10 +745,7 @@ function Admins({ submissionLogs, onRefresh }) {
                                                     upload,
                                                     parentRow: row,
                                                     allUploads: uploads,
-                                                    attachment:
-                                                      attachMap[
-                                                        upload.Attachment_ID
-                                                      ] ?? null,
+                                                    attachment: attachMap[upload.Attachment_ID] ?? null,
                                                   })
                                                 }
                                                 sx={{
@@ -696,16 +753,13 @@ function Admins({ submissionLogs, onRefresh }) {
                                                   fontSize: 12,
                                                   borderColor: "#1b3a6b",
                                                   color: "#1b3a6b",
-                                                  "&:hover": {
-                                                    bgcolor: "#1b3a6b",
-                                                    color: "white",
-                                                  },
+                                                  "&:hover": { bgcolor: "#1b3a6b", color: "white" },
                                                 }}
                                               >
                                                 Review
                                               </Button>
                                             ) : (
-                                              (upload[col.key] ?? "—")
+                                              upload[col.key] ?? "—"
                                             )}
                                           </TableCell>
                                         ))}
@@ -724,6 +778,81 @@ function Admins({ submissionLogs, onRefresh }) {
                                   )}
                                 </TableBody>
                               </Table>
+                            ) : (
+                              /* ── User Messages tab ── */
+                              <Box
+                                sx={{
+                                  bgcolor: "white",
+                                  border: "1px solid #e0e4ea",
+                                  borderRadius: 1,
+                                  p: 2,
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: 2,
+                                  maxHeight: 320,
+                                  overflowY: "auto",
+                                }}
+                              >
+                                {notes.length ? (
+                                  notes.map((note) => (
+                                    <Box key={note.id} sx={{ display: "flex", gap: 1.5, alignItems: "flex-start" }}>
+                                      {/* Avatar */}
+                                      <Box
+                                        sx={{
+                                          width: 34,
+                                          height: 34,
+                                          borderRadius: "50%",
+                                          bgcolor: "#1b3a6b",
+                                          color: "white",
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          fontSize: 13,
+                                          fontWeight: 700,
+                                          flexShrink: 0,
+                                          mt: 0.25,
+                                        }}
+                                      >
+                                        {(row.Client_Name ?? "?")[0].toUpperCase()}
+                                      </Box>
+
+                                      {/* Bubble */}
+                                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                                        <Box sx={{ display: "flex", alignItems: "baseline", gap: 1, mb: 0.5 }}>
+                                          <Typography fontWeight={700} fontSize={13} color="#1b3a6b" noWrap>
+                                            {row.Client_Name ?? "Unknown"}
+                                          </Typography>
+                                          <Typography fontSize={11} color="text.secondary" flexShrink={0}>
+                                            {note.Created_Time ? formatNoteTime(note.Created_Time) : "—"}
+                                          </Typography>
+                                        </Box>
+                                        <Box
+                                          sx={{
+                                            bgcolor: "#eef3ff",
+                                            border: "1px solid #d0ddf7",
+                                            borderRadius: "0 10px 10px 10px",
+                                            px: 1.75,
+                                            py: 1,
+                                          }}
+                                        >
+                                          {note.Note_Title && (
+                                            <Typography fontSize={11} fontWeight={700} color="#1b3a6b" mb={0.25}>
+                                              {note.Note_Title}
+                                            </Typography>
+                                          )}
+                                          <Typography fontSize={13} color="#333" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                            {note.Note_Content ?? "—"}
+                                          </Typography>
+                                        </Box>
+                                      </Box>
+                                    </Box>
+                                  ))
+                                ) : (
+                                  <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
+                                    No messages found.
+                                  </Typography>
+                                )}
+                              </Box>
                             )}
                           </Box>
                         </Collapse>

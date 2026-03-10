@@ -3,7 +3,8 @@
     "allow": [
       "WebFetch(domain:help.zwidgets.com)",
       "WebFetch(domain:www.zoho.com)",
-      "WebFetch(domain:www.marksgroup.net)"
+      "WebFetch(domain:www.marksgroup.net)",
+      "Read(//c/Users/USER/.claude/projects/c--Users-USER-Documents-GitHub-home-espana-admin-dashboard-crm-webtab/**)"
     ]
   }
 }
