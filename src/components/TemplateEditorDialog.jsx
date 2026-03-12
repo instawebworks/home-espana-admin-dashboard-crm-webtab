@@ -53,7 +53,7 @@ function TemplateEditorDialog({
   const [moduleFieldsLoading, setModuleFieldsLoading] = useState(false);
   const [errors, setErrors] = useState({});
 
-  // Holds passwordField/workdriveFolder to restore after module fields load in edit mode
+  // Holds passwordField/workdriveFolder to restore after module fields load in edit mode =>
   const pendingFieldsRef = useRef(null);
 
   const isEditMode = !!editRecord;
