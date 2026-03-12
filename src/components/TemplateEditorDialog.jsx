@@ -22,24 +22,7 @@ const CONNECTION = "zoho_crm_conn_used_in_widget_do_not_delete";
 
 const REQUIREMENT_OPTIONS = ["Required", "Optional"];
 
-const FILE_TYPE_OPTIONS = [
-  "PDF",
-  "PNG",
-  "JPG",
-  "JPEG",
-  "HEIC",
-  "WebP",
-  "GIF",
-  "TIFF",
-  "DOC",
-  "DOCX",
-  "XLS",
-  "XLSX",
-  "PPT",
-  "PPTX",
-  "TXT",
-  "CSV",
-];
+const FILE_TYPE_OPTIONS = ["PDF", "PNG", "JPG", "JPEG"];
 
 function createField() {
   return {
