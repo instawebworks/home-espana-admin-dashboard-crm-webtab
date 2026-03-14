@@ -123,6 +123,7 @@ function formatNoteTime(isoString) {
 // ─── Review Document Dialog ────────────────────────────────────────────────
 
 const CONNECTION = "zoho_crm_conn_used_in_widget_do_not_delete";
+const WORKDRIVE_CONNECTION = "workdrive_connection_do_not_delete";
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "heic"]);
 const OFFICE_EXTS = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx"]);
 
@@ -134,6 +135,7 @@ function ReviewDocumentDialog({
   allUploads,
   attachment,
   onStatusUpdate,
+  workdriveFolderId,
 }) {
   const [docUrl, setDocUrl] = useState(null);
   const [docLoading, setDocLoading] = useState(false);
@@ -282,9 +284,67 @@ function ReviewDocumentDialog({
     }
     setActionLoading(true);
     try {
+      let newDocName = null;
+      let newAttachmentId = null;
+      let base64 = null;
+
+      if (status === "Approved" && upload.Attachment_ID) {
+        // Count already-approved docs of the same Document_Type
+        const approvedCount = (allUploads ?? []).filter(
+          (u) =>
+            u.id !== upload.id &&
+            u.Document_Type === upload.Document_Type &&
+            u.Approval_Status === "Approved",
+        ).length;
+        const seq = String(approvedCount + 1).padStart(2, "0");
+        newDocName = `${upload.Document_Type} ${seq}.${ext}`;
+
+        // Step 1: Download the attachment binary
+        const downloadResp = await ZOHO.CRM.CONNECTION.invoke(CONNECTION, {
+          url: `https://www.zohoapis.eu/crm/v8/Submission_Logs/${parentRow.id}/Attachments/${upload.Attachment_ID}`,
+          method: "GET",
+          param_type: 1,
+        });
+        // const content = downloadResp?.details?.statusMessage;
+        if (!downloadResp || typeof downloadResp !== "string") {
+          console.error("[ApproveOps] Could not download attachment");
+        } else {
+          let binaryStr = "";
+          for (let i = 0; i < downloadResp.length; i++) {
+            binaryStr += String.fromCharCode(downloadResp.charCodeAt(i) & 0xff);
+          }
+          base64 = btoa(binaryStr);
+          console.log(base64);
+
+          // Step 2: Delete the old attachment
+          await ZOHO.CRM.CONNECTION.invoke(CONNECTION, {
+            url: `https://www.zohoapis.eu/crm/v8/Submission_Logs/${parentRow.id}/Attachments?ids=${upload.Attachment_ID}`,
+            method: "DELETE",
+            param_type: 1,
+          });
+
+          // Step 3: Re-upload with the new name using ZOHO.CRM.API.attachFile
+          const byteChars = atob(base64);
+          const byteArray = new Uint8Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) {
+            byteArray[i] = byteChars.charCodeAt(i);
+          }
+          const file = new File([byteArray], newDocName);
+          const uploadResp = await ZOHO.CRM.API.attachFile({
+            Entity: "Submission_Logs",
+            RecordID: parentRow.id,
+            File: { Name: newDocName, Content: file },
+          });
+          newAttachmentId = uploadResp?.data?.[0]?.details?.id ?? null;
+        }
+      }
+
+      // Build subform update rows (now includes the new Attachment_ID)
       const allRows = (allUploads ?? []).map((u) => {
         if (u.id !== upload.id) return { id: u.id };
         const row = { id: u.id, Approval_Status: status };
+        if (newDocName) row.Document_Name = newDocName;
+        if (newAttachmentId) row.Attachment_ID = String(newAttachmentId);
         if (comment.trim()) row.Admin_Comment = comment.trim();
         return row;
       });
@@ -296,9 +356,33 @@ function ReviewDocumentDialog({
       });
 
       if (resp?.data?.[0]?.code === "SUCCESS") {
-        onStatusUpdate(parentRow.id, upload.id, status, comment.trim());
+        console.log("1");
+        // Upload to WorkDrive if folder ID exists
+        if (status === "Approved" && base64 && workdriveFolderId) {
+          console.log("2");
+          const wdResp = await ZOHO.CRM.CONNECTION.invoke(
+            WORKDRIVE_CONNECTION,
+            {
+              url: `https://www.zohoapis.eu/workdrive/api/v1/upload?parent_id=${workdriveFolderId}&filename=${encodeURIComponent(newDocName)}&override-name-exist=true`,
+              method: "POST",
+              param_type: 2,
+              body: {
+                content: { content: base64, name: newDocName },
+              },
+            },
+          );
+          console.log("[ApproveOps] WorkDrive upload response", wdResp);
+        }
+        onStatusUpdate(
+          parentRow.id,
+          upload.id,
+          status,
+          comment.trim(),
+          newDocName,
+        );
         onClose();
       }
+      setActionLoading(false);
     } catch (err) {
       console.error("Failed to update approval status", err);
     } finally {
@@ -482,6 +566,7 @@ function Admins({ submissionLogs, onRefresh }) {
   const [uploadsCache, setUploadsCache] = useState({}); // { recordId: upload[] }
   const [attachmentsCache, setAttachmentsCache] = useState({}); // { recordId: { attachmentId: attachment } }
   const [notesCache, setNotesCache] = useState({}); // { recordId: note[] }
+  const [relatedRecordCache, setRelatedRecordCache] = useState({}); // { recordId: related module record }
   const [loadingId, setLoadingId] = useState(null);
   const [reviewDialog, setReviewDialog] = useState(null); // { upload, parentRow, attachment }
 
@@ -495,24 +580,34 @@ function Admins({ submissionLogs, onRefresh }) {
     if (uploadsCache[row.id]) return;
     setLoadingId(row.id);
     try {
-      // Fetch subform uploads, CRM attachments, and notes in parallel =>
-      const [recordResp, attachResp, notesResp] = await Promise.all([
-        ZOHO.CRM.API.getRecord({ Entity: "Submission_Logs", RecordID: row.id }),
-        ZOHO.CRM.API.getRelatedRecords({
-          Entity: "Submission_Logs",
-          RecordID: row.id,
-          RelatedList: "Attachments",
-          page: 1,
-          per_page: 200,
-        }),
-        ZOHO.CRM.API.getRelatedRecords({
-          Entity: "Submission_Logs",
-          RecordID: row.id,
-          RelatedList: "Notes",
-          page: 1,
-          per_page: 200,
-        }),
-      ]);
+      // Fetch subform uploads, CRM attachments, notes, and related module record in parallel
+      const [recordResp, attachResp, notesResp, relatedResp] =
+        await Promise.all([
+          ZOHO.CRM.API.getRecord({
+            Entity: "Submission_Logs",
+            RecordID: row.id,
+          }),
+          ZOHO.CRM.API.getRelatedRecords({
+            Entity: "Submission_Logs",
+            RecordID: row.id,
+            RelatedList: "Attachments",
+            page: 1,
+            per_page: 200,
+          }),
+          ZOHO.CRM.API.getRelatedRecords({
+            Entity: "Submission_Logs",
+            RecordID: row.id,
+            RelatedList: "Notes",
+            page: 1,
+            per_page: 200,
+          }),
+          row.Related_Module_Name && row.Related_Record_ID
+            ? ZOHO.CRM.API.getRecord({
+                Entity: row.Related_Module_Name,
+                RecordID: row.Related_Record_ID,
+              })
+            : Promise.resolve(null),
+        ]);
 
       const uploads = recordResp?.data?.[0]?.Document_Uploads ?? [];
 
@@ -525,6 +620,10 @@ function Admins({ submissionLogs, onRefresh }) {
       setUploadsCache((prev) => ({ ...prev, [row.id]: uploads }));
       setAttachmentsCache((prev) => ({ ...prev, [row.id]: attachMap }));
       setNotesCache((prev) => ({ ...prev, [row.id]: notesResp?.data ?? [] }));
+      setRelatedRecordCache((prev) => ({
+        ...prev,
+        [row.id]: relatedResp?.data?.[0] ?? null,
+      }));
     } catch (err) {
       console.error("Failed to fetch record data", err);
       setUploadsCache((prev) => ({ ...prev, [row.id]: [] }));
@@ -534,7 +633,13 @@ function Admins({ submissionLogs, onRefresh }) {
     }
   };
 
-  const handleStatusUpdate = (parentId, uploadId, status, comment) => {
+  const handleStatusUpdate = (
+    parentId,
+    uploadId,
+    status,
+    comment,
+    newDocName,
+  ) => {
     setUploadsCache((prev) => ({
       ...prev,
       [parentId]: (prev[parentId] ?? []).map((u) =>
@@ -543,6 +648,7 @@ function Admins({ submissionLogs, onRefresh }) {
               ...u,
               Approval_Status: status,
               ...(comment && { Admin_Comment: comment }),
+              ...(newDocName && { Document_Name: newDocName }),
             }
           : u,
       ),
@@ -769,6 +875,10 @@ function Admins({ submissionLogs, onRefresh }) {
                                                       attachMap[
                                                         upload.Attachment_ID
                                                       ] ?? null,
+                                                    workdriveFolderId:
+                                                      relatedRecordCache[row.id]
+                                                        ?.easyworkdriveforcrm__Workdrive_Folder_ID_EXT ??
+                                                      null,
                                                   })
                                                 }
                                                 sx={{
@@ -955,6 +1065,7 @@ function Admins({ submissionLogs, onRefresh }) {
         allUploads={reviewDialog?.allUploads}
         attachment={reviewDialog?.attachment}
         onStatusUpdate={handleStatusUpdate}
+        workdriveFolderId={reviewDialog?.workdriveFolderId}
       />
     </Box>
   );
