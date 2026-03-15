@@ -18,7 +18,7 @@ import {
   Tabs,
   Tab,
 } from "@mui/material";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import CloseIcon from "@mui/icons-material/Close";
 import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
 
@@ -123,7 +123,6 @@ function formatNoteTime(isoString) {
 // ─── Review Document Dialog ────────────────────────────────────────────────
 
 const CONNECTION = "zoho_crm_conn_used_in_widget_do_not_delete";
-const WORKDRIVE_CONNECTION = "workdrive_connection_do_not_delete";
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "heic"]);
 const OFFICE_EXTS = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx"]);
 
@@ -286,10 +285,9 @@ function ReviewDocumentDialog({
     try {
       let newDocName = null;
       let newAttachmentId = null;
-      let base64 = null;
 
       if (status === "Approved" && upload.Attachment_ID) {
-        // Count already-approved docs of the same Document_Type
+        // Generate sequential name: "Passport 01.pdf", "Bank Statement 02.png", etc.
         const approvedCount = (allUploads ?? []).filter(
           (u) =>
             u.id !== upload.id &&
@@ -299,47 +297,34 @@ function ReviewDocumentDialog({
         const seq = String(approvedCount + 1).padStart(2, "0");
         newDocName = `${upload.Document_Type} ${seq}.${ext}`;
 
-        // Step 1: Download the attachment binary
-        const downloadResp = await ZOHO.CRM.CONNECTION.invoke(CONNECTION, {
-          url: `https://www.zohoapis.eu/crm/v8/Submission_Logs/${parentRow.id}/Attachments/${upload.Attachment_ID}`,
-          method: "GET",
-          param_type: 1,
+        // Call Deluge custom function to handle binary file ops server-side
+        // (download → delete → re-upload with new name → WorkDrive upload)
+        const funcResp = await ZOHO.CRM.FUNCTIONS.execute(
+          "widget_rename_and_upload_attachment",
+          {
+            arguments: JSON.stringify({
+              record_id: String(parentRow.id),
+              attachment_id: String(upload.Attachment_ID),
+              new_name: newDocName,
+              workdrive_folder_id: workdriveFolderId || "",
+            }),
+          },
+        );
+        console.log("[ApproveOps] Function response", {
+          arguments: JSON.stringify({
+            record_id: String(parentRow.id),
+            attachment_id: String(upload.Attachment_ID),
+            new_name: newDocName,
+            workdrive_folder_id: workdriveFolderId || "",
+          }),
         });
-        // const content = downloadResp?.details?.statusMessage;
-        if (!downloadResp || typeof downloadResp !== "string") {
-          console.error("[ApproveOps] Could not download attachment");
-        } else {
-          let binaryStr = "";
-          for (let i = 0; i < downloadResp.length; i++) {
-            binaryStr += String.fromCharCode(downloadResp.charCodeAt(i) & 0xff);
-          }
-          base64 = btoa(binaryStr);
-          console.log(base64);
-
-          // Step 2: Delete the old attachment
-          await ZOHO.CRM.CONNECTION.invoke(CONNECTION, {
-            url: `https://www.zohoapis.eu/crm/v8/Submission_Logs/${parentRow.id}/Attachments?ids=${upload.Attachment_ID}`,
-            method: "DELETE",
-            param_type: 1,
-          });
-
-          // Step 3: Re-upload with the new name using ZOHO.CRM.API.attachFile
-          const byteChars = atob(base64);
-          const byteArray = new Uint8Array(byteChars.length);
-          for (let i = 0; i < byteChars.length; i++) {
-            byteArray[i] = byteChars.charCodeAt(i);
-          }
-          const file = new File([byteArray], newDocName);
-          const uploadResp = await ZOHO.CRM.API.attachFile({
-            Entity: "Submission_Logs",
-            RecordID: parentRow.id,
-            File: { Name: newDocName, Content: file },
-          });
-          newAttachmentId = uploadResp?.data?.[0]?.details?.id ?? null;
-        }
+        const output = funcResp?.details?.output
+          ? JSON.parse(funcResp.details.output)
+          : null;
+        newAttachmentId = output?.new_attachment_id ?? null;
       }
 
-      // Build subform update rows (now includes the new Attachment_ID)
+      // Build subform update rows
       const allRows = (allUploads ?? []).map((u) => {
         if (u.id !== upload.id) return { id: u.id };
         const row = { id: u.id, Approval_Status: status };
@@ -356,23 +341,6 @@ function ReviewDocumentDialog({
       });
 
       if (resp?.data?.[0]?.code === "SUCCESS") {
-        console.log("1");
-        // Upload to WorkDrive if folder ID exists
-        if (status === "Approved" && base64 && workdriveFolderId) {
-          console.log("2");
-          const wdResp = await ZOHO.CRM.CONNECTION.invoke(
-            WORKDRIVE_CONNECTION,
-            {
-              url: `https://www.zohoapis.eu/workdrive/api/v1/upload?parent_id=${workdriveFolderId}&filename=${encodeURIComponent(newDocName)}&override-name-exist=true`,
-              method: "POST",
-              param_type: 2,
-              body: {
-                content: { content: base64, name: newDocName },
-              },
-            },
-          );
-          console.log("[ApproveOps] WorkDrive upload response", wdResp);
-        }
         onStatusUpdate(
           parentRow.id,
           upload.id,
@@ -382,7 +350,6 @@ function ReviewDocumentDialog({
         );
         onClose();
       }
-      setActionLoading(false);
     } catch (err) {
       console.error("Failed to update approval status", err);
     } finally {
@@ -725,8 +692,8 @@ function Admins({ submissionLogs, onRefresh }) {
                 const notes = notesCache[row.id] ?? [];
 
                 return (
-                  <>
-                    <TableRow key={row.id} hover>
+                  <Fragment key={row.id}>
+                    <TableRow hover>
                       {COLUMNS.map((col) => (
                         <TableCell
                           key={col.key}
@@ -1039,7 +1006,7 @@ function Admins({ submissionLogs, onRefresh }) {
                         </Collapse>
                       </TableCell>
                     </TableRow>
-                  </>
+                  </Fragment>
                 );
               })
             ) : (
