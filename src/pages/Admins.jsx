@@ -338,9 +338,24 @@ function ReviewDocumentDialog({
       const apiData = { id: parentRow.id, Document_Uploads: allRows };
 
       if (status === "Rejected") {
-        const madrid = new Date().toLocaleString("en-CA", { timeZone: "Europe/Madrid", hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const madrid = new Date().toLocaleString("en-CA", {
+          timeZone: "Europe/Madrid",
+          hour12: false,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
         const [datePart, timePart] = madrid.replace(/, /g, "T").split("T");
-        const offset = new Date().toLocaleString("en-US", { timeZone: "Europe/Madrid", timeZoneName: "longOffset" }).split("GMT")[1] || "+01:00";
+        const offset =
+          new Date()
+            .toLocaleString("en-US", {
+              timeZone: "Europe/Madrid",
+              timeZoneName: "longOffset",
+            })
+            .split("GMT")[1] || "+01:00";
         const dateTime = `${datePart}T${timePart}${offset}`;
         apiData.Rejection_Name_Datetime = `${upload.Document_Name} -##- ${dateTime}`;
       }
@@ -348,7 +363,7 @@ function ReviewDocumentDialog({
       const resp = await ZOHO.CRM.API.updateRecord({
         Entity: "Submission_Logs",
         APIData: apiData,
-        Trigger: [],
+        Trigger: ["workflow"],
       });
 
       if (resp?.data?.[0]?.code === "SUCCESS") {
