@@ -18,7 +18,7 @@ import {
   Tabs,
   Tab,
 } from "@mui/material";
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import CloseIcon from "@mui/icons-material/Close";
 import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
 
@@ -34,12 +34,6 @@ const COLUMNS = [
   { label: "Modified Time", key: "Modified_Time" },
 ];
 
-const UPLOAD_COLUMNS = [
-  { label: "Document Name", key: "Document_Name" },
-  { label: "Document Type", key: "Document_Type" },
-  { label: "Approval Status", key: "Approval_Status" },
-  { label: "Actions", key: "_actions" },
-];
 
 const STATUS_STYLES = {
   Pending: { bg: "#fff8e1", color: "#b45309", border: "#fde68a" },
@@ -551,6 +545,212 @@ function ReviewDocumentDialog({
   );
 }
 
+// ─── Checklist Upload View ────────────────────────────────────────────────
+
+function getReqStatus(req, uploads) {
+  const matching = uploads.filter((u) => u.Document_Type === req.name);
+  const scanType = req.scanType ?? "Single";
+
+  if (scanType === "Front & Back") {
+    const frontOk = matching.some(
+      (u) => u.Scan_Type === "Front" && u.Approval_Status === "Approved",
+    );
+    const backOk = matching.some(
+      (u) => u.Scan_Type === "Back" && u.Approval_Status === "Approved",
+    );
+    if (frontOk && backOk) return "Approved";
+    if (matching.some((u) => u.Approval_Status === "Rejected")) return "Rejected";
+    if (matching.length === 0) return "Missing";
+    return "Pending";
+  }
+
+  if (matching.some((u) => u.Approval_Status === "Approved")) return "Approved";
+  if (matching.some((u) => u.Approval_Status === "Rejected")) return "Rejected";
+  if (matching.length === 0) return "Missing";
+  return "Pending";
+}
+
+function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, onReview }) {
+  if (!uploads.length) {
+    return (
+      <Typography
+        variant="body2"
+        color="text.secondary"
+        sx={{ py: 1.5, px: 1, fontStyle: "italic" }}
+      >
+        No uploads yet.
+      </Typography>
+    );
+  }
+  return (
+    <Table size="small" sx={{ bgcolor: "white", borderRadius: 1, overflow: "hidden" }}>
+      <TableHead>
+        <TableRow>
+          {["Document Name", "Status", "Actions"].map((h) => (
+            <TableCell
+              key={h}
+              sx={{
+                bgcolor: "#eef1f6",
+                fontWeight: 600,
+                color: "#1b3a6b",
+                borderBottom: "2px solid #e0e4ea",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {h}
+            </TableCell>
+          ))}
+        </TableRow>
+      </TableHead>
+      <TableBody>
+        {uploads.map((upload, idx) => (
+          <TableRow key={idx} hover>
+            <TableCell sx={{ color: "#333", borderBottom: "1px solid #e0e4ea" }}>
+              {upload.Document_Name ?? "—"}
+            </TableCell>
+            <TableCell sx={{ borderBottom: "1px solid #e0e4ea" }}>
+              <StatusBadge status={upload.Approval_Status} />
+            </TableCell>
+            <TableCell sx={{ borderBottom: "1px solid #e0e4ea" }}>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() =>
+                  onReview({
+                    upload,
+                    parentRow: row,
+                    allUploads,
+                    attachment: attachMap[upload.Attachment_ID] ?? null,
+                    workdriveFolderId:
+                      relatedRecord?.easyworkdriveforcrm__Workdrive_Folder_ID_EXT ?? null,
+                  })
+                }
+                sx={{
+                  textTransform: "none",
+                  fontSize: 12,
+                  borderColor: "#1b3a6b",
+                  color: "#1b3a6b",
+                  "&:hover": { bgcolor: "#1b3a6b", color: "white" },
+                }}
+              >
+                Review
+              </Button>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRecord, onReview }) {
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+      {requirements.map((req) => {
+        const scanType = req.scanType ?? "Single";
+        const matching = uploads.filter((u) => u.Document_Type === req.name);
+        const overallStatus = getReqStatus(req, uploads);
+
+        return (
+          <Box
+            key={req.id}
+            sx={{ border: "1px solid #e0e4ea", borderRadius: 1.5, overflow: "hidden", bgcolor: "white" }}
+          >
+            {/* Section header */}
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                px: 2,
+                py: 1.25,
+                bgcolor: "#f5f7fa",
+                borderBottom: "1px solid #e0e4ea",
+              }}
+            >
+              <Typography fontWeight={700} fontSize={14} color="#1b3a6b">
+                {req.name}
+              </Typography>
+              <Box
+                component="span"
+                sx={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  px: 1,
+                  py: 0.25,
+                  borderRadius: 99,
+                  bgcolor: req.requirement === "Required" ? "#eff6ff" : "#f9fafb",
+                  color: req.requirement === "Required" ? "#1d4ed8" : "#6b7280",
+                  border: `1px solid ${req.requirement === "Required" ? "#bfdbfe" : "#e5e7eb"}`,
+                }}
+              >
+                {req.requirement}
+              </Box>
+              {scanType === "Front & Back" && (
+                <Box
+                  component="span"
+                  sx={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    px: 1,
+                    py: 0.25,
+                    borderRadius: 99,
+                    bgcolor: "#faf5ff",
+                    color: "#7c3aed",
+                    border: "1px solid #e9d5ff",
+                  }}
+                >
+                  Front & Back
+                </Box>
+              )}
+              <Box sx={{ ml: "auto" }}>
+                <StatusBadge status={overallStatus} />
+              </Box>
+            </Box>
+
+            {/* Body */}
+            <Box sx={{ p: 1.5 }}>
+              {scanType === "Front & Back" ? (
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                  {["Front", "Back"].map((side) => (
+                    <Box key={side}>
+                      <Typography
+                        fontSize={11}
+                        fontWeight={700}
+                        color="#6b7280"
+                        sx={{ mb: 0.5, textTransform: "uppercase", letterSpacing: 0.5 }}
+                      >
+                        {side}
+                      </Typography>
+                      <UploadSubTable
+                        uploads={matching.filter((u) => u.Scan_Type === side)}
+                        allUploads={uploads}
+                        attachMap={attachMap}
+                        row={row}
+                        relatedRecord={relatedRecord}
+                        onReview={onReview}
+                      />
+                    </Box>
+                  ))}
+                </Box>
+              ) : (
+                <UploadSubTable
+                  uploads={matching}
+                  allUploads={uploads}
+                  attachMap={attachMap}
+                  row={row}
+                  relatedRecord={relatedRecord}
+                  onReview={onReview}
+                />
+              )}
+            </Box>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
 // ─── Main Admins Page ──────────────────────────────────────────────────────
 
 function Admins({ submissionLogs, onRefresh }) {
@@ -560,6 +760,8 @@ function Admins({ submissionLogs, onRefresh }) {
   const [attachmentsCache, setAttachmentsCache] = useState({}); // { recordId: { attachmentId: attachment } }
   const [notesCache, setNotesCache] = useState({}); // { recordId: note[] }
   const [relatedRecordCache, setRelatedRecordCache] = useState({}); // { recordId: related module record }
+  const [templateCache, setTemplateCache] = useState({}); // { templateId: parsedTemplateJSON }
+  const templateCacheRef = useRef({});
   const [loadingId, setLoadingId] = useState(null);
   const [reviewDialog, setReviewDialog] = useState(null); // { upload, parentRow, attachment }
 
@@ -573,8 +775,9 @@ function Admins({ submissionLogs, onRefresh }) {
     if (uploadsCache[row.id]) return;
     setLoadingId(row.id);
     try {
-      // Fetch subform uploads, CRM attachments, notes, and related module record in parallel
-      const [recordResp, attachResp, notesResp, relatedResp] =
+      // Fetch subform uploads, CRM attachments, notes, related record, and template in parallel
+      const templateId = row.Template_ID;
+      const [recordResp, attachResp, notesResp, relatedResp, templateResp] =
         await Promise.all([
           ZOHO.CRM.API.getRecord({
             Entity: "Submission_Logs",
@@ -600,6 +803,12 @@ function Admins({ submissionLogs, onRefresh }) {
                 RecordID: row.Related_Record_ID,
               })
             : Promise.resolve(null),
+          templateId && !templateCacheRef.current[templateId]
+            ? ZOHO.CRM.API.getRecord({
+                Entity: "Document_Templates",
+                RecordID: templateId,
+              })
+            : Promise.resolve(null),
         ]);
 
       const uploads = recordResp?.data?.[0]?.Document_Uploads ?? [];
@@ -617,6 +826,12 @@ function Admins({ submissionLogs, onRefresh }) {
         ...prev,
         [row.id]: relatedResp?.data?.[0] ?? null,
       }));
+
+      if (templateResp?.data?.[0]?.Template_JSON) {
+        const parsed = JSON.parse(templateResp.data[0].Template_JSON);
+        templateCacheRef.current[templateId] = parsed;
+        setTemplateCache((prev) => ({ ...prev, [templateId]: parsed }));
+      }
     } catch (err) {
       console.error("Failed to fetch record data", err);
       setUploadsCache((prev) => ({ ...prev, [row.id]: [] }));
@@ -716,6 +931,7 @@ function Admins({ submissionLogs, onRefresh }) {
                 const uploads = uploadsCache[row.id] ?? [];
                 const attachMap = attachmentsCache[row.id] ?? {};
                 const notes = notesCache[row.id] ?? [];
+                const template = templateCache[row.Template_ID] ?? null;
 
                 return (
                   <Fragment key={row.id}>
@@ -806,107 +1022,24 @@ function Admins({ submissionLogs, onRefresh }) {
                               </Box>
                             ) : activeTab === 0 ? (
                               /* ── User Uploads tab ── */
-                              <Table
-                                size="small"
-                                sx={{
-                                  tableLayout: "fixed",
-                                  width: "100%",
-                                  bgcolor: "white",
-                                  borderRadius: 1,
-                                  overflow: "hidden",
-                                }}
-                              >
-                                <TableHead>
-                                  <TableRow>
-                                    {UPLOAD_COLUMNS.map((col) => (
-                                      <TableCell
-                                        key={col.key}
-                                        sx={{
-                                          bgcolor: "#eef1f6",
-                                          fontWeight: 600,
-                                          color: "#1b3a6b",
-                                          borderBottom: "2px solid #e0e4ea",
-                                          whiteSpace: "nowrap",
-                                          overflow: "hidden",
-                                          textOverflow: "ellipsis",
-                                        }}
-                                      >
-                                        {col.label}
-                                      </TableCell>
-                                    ))}
-                                  </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                  {uploads.length ? (
-                                    uploads.map((upload, idx) => (
-                                      <TableRow key={idx} hover>
-                                        {UPLOAD_COLUMNS.map((col) => (
-                                          <TableCell
-                                            key={col.key}
-                                            sx={{
-                                              color: "#333",
-                                              borderBottom: "1px solid #e0e4ea",
-                                              whiteSpace: "nowrap",
-                                              overflow: "hidden",
-                                              textOverflow: "ellipsis",
-                                            }}
-                                          >
-                                            {col.key === "Approval_Status" ? (
-                                              <StatusBadge
-                                                status={upload.Approval_Status}
-                                              />
-                                            ) : col.key === "_actions" ? (
-                                              <Button
-                                                size="small"
-                                                variant="outlined"
-                                                onClick={() =>
-                                                  setReviewDialog({
-                                                    upload,
-                                                    parentRow: row,
-                                                    allUploads: uploads,
-                                                    attachment:
-                                                      attachMap[
-                                                        upload.Attachment_ID
-                                                      ] ?? null,
-                                                    workdriveFolderId:
-                                                      relatedRecordCache[row.id]
-                                                        ?.easyworkdriveforcrm__Workdrive_Folder_ID_EXT ??
-                                                      null,
-                                                  })
-                                                }
-                                                sx={{
-                                                  textTransform: "none",
-                                                  fontSize: 12,
-                                                  borderColor: "#1b3a6b",
-                                                  color: "#1b3a6b",
-                                                  "&:hover": {
-                                                    bgcolor: "#1b3a6b",
-                                                    color: "white",
-                                                  },
-                                                }}
-                                              >
-                                                Review
-                                              </Button>
-                                            ) : (
-                                              (upload[col.key] ?? "—")
-                                            )}
-                                          </TableCell>
-                                        ))}
-                                      </TableRow>
-                                    ))
-                                  ) : (
-                                    <TableRow>
-                                      <TableCell
-                                        colSpan={UPLOAD_COLUMNS.length}
-                                        align="center"
-                                        sx={{ py: 2, color: "text.secondary" }}
-                                      >
-                                        No uploads found.
-                                      </TableCell>
-                                    </TableRow>
-                                  )}
-                                </TableBody>
-                              </Table>
+                              template?.documentRequirements?.length ? (
+                                <ChecklistUploadsView
+                                  requirements={template.documentRequirements}
+                                  uploads={uploads}
+                                  attachMap={attachMap}
+                                  row={row}
+                                  relatedRecord={relatedRecordCache[row.id]}
+                                  onReview={setReviewDialog}
+                                />
+                              ) : (
+                                <Typography
+                                  variant="body2"
+                                  color="text.secondary"
+                                  sx={{ py: 2, textAlign: "center" }}
+                                >
+                                  No template structure found for this submission.
+                                </Typography>
+                              )
                             ) : (
                               /* ── User Messages tab ── */
                               <Box

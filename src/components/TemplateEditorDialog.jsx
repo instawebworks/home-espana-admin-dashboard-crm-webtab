@@ -30,6 +30,7 @@ function createField() {
     name: "",
     checked: true,
     requirement: "Required",
+    scanType: "Single",
     fileTypes: [],
     uploadCount: 1,
     additionalInstructions: "",
@@ -43,12 +44,10 @@ function TemplateEditorDialog({
   editRecord,
 }) {
   const [templateName, setTemplateName] = useState("");
-  const [moduleName, setModuleName] = useState(null);
+  const [moduleName] = useState({ label: "Deals", value: "Deals" });
   const [passwordField, setPasswordField] = useState(null);
   const [workdriveFolder, setWorkdriveFolder] = useState(null);
   const [fields, setFields] = useState([createField()]);
-  const [modules, setModules] = useState([]);
-  const [modulesLoading, setModulesLoading] = useState(false);
   const [moduleFields, setModuleFields] = useState([]);
   const [moduleFieldsLoading, setModuleFieldsLoading] = useState(false);
   const [errors, setErrors] = useState({});
@@ -58,68 +57,34 @@ function TemplateEditorDialog({
 
   const isEditMode = !!editRecord;
 
-  // Fetch modules on open; pre-fill form if editing
+  // Pre-fill form if editing
   useEffect(() => {
-    if (!open) return;
+    if (!open || !editRecord) return;
 
-    const fetchModules = async () => {
-      setModulesLoading(true);
-      try {
-        const resp = await ZOHO.CRM.CONNECTION.invoke(CONNECTION, {
-          url: "https://www.zohoapis.eu/crm/v8/settings/modules",
-          method: "GET",
-          param_type: 1,
-        });
-        const list =
-          resp?.details?.statusMessage?.modules?.filter(
-            (modules) =>
-              modules?.api_supported === true &&
-              modules?.status === "visible" &&
-              (modules?.generated_type === "default" ||
-                modules?.generated_type === "custom") &&
-              modules?.editable === true,
-          ) ?? [];
-        setModules(
-          list.map((m) => ({ label: m.plural_label, value: m.api_name })),
-        );
-      } catch (err) {
-        console.error("Failed to fetch modules", err);
-      } finally {
-        setModulesLoading(false);
-      }
+    const parsed =
+      typeof editRecord.Template_JSON === "string"
+        ? JSON.parse(editRecord.Template_JSON)
+        : editRecord.Template_JSON;
+
+    setTemplateName(parsed.templateName || editRecord.Name || "");
+    setFields(
+      parsed.documentRequirements?.length
+        ? parsed.documentRequirements
+        : [createField()],
+    );
+
+    pendingFieldsRef.current = {
+      passwordField: parsed.passwordField || null,
+      workdriveFolder: parsed.workdriveFolder || null,
     };
-
-    fetchModules();
-
-    if (editRecord) {
-      const parsed =
-        typeof editRecord.Template_JSON === "string"
-          ? JSON.parse(editRecord.Template_JSON)
-          : editRecord.Template_JSON;
-
-      setTemplateName(parsed.templateName || editRecord.Name || "");
-      setFields(
-        parsed.documentRequirements?.length
-          ? parsed.documentRequirements
-          : [createField()],
-      );
-
-      // Store pending values — restored after module fields are fetched
-      pendingFieldsRef.current = {
-        passwordField: parsed.passwordField || null,
-        workdriveFolder: parsed.workdriveFolder || null,
-      };
-
-      setModuleName(parsed.moduleName || null);
-    }
   }, [open, editRecord]);
 
-  // Fetch module fields whenever module changes; restore edit values if pending
+  // Fetch module fields on open; restore edit values if pending
   useEffect(() => {
+    if (!open) return;
     setPasswordField(null);
     setWorkdriveFolder(null);
     setModuleFields([]);
-    if (!moduleName) return;
 
     const fetchFields = async () => {
       setModuleFieldsLoading(true);
@@ -161,7 +126,7 @@ function TemplateEditorDialog({
     };
 
     fetchFields();
-  }, [moduleName]);
+  }, [open, moduleName.value]);
 
   const handleAddField = () => {
     setFields((prev) => [...prev, createField()]);
@@ -181,7 +146,6 @@ function TemplateEditorDialog({
     const newErrors = {};
     if (!templateName.trim())
       newErrors.templateName = "Template name is required.";
-    if (!moduleName) newErrors.moduleName = "Module name is required.";
     if (!passwordField) newErrors.passwordField = "Password field is required.";
     if (!workdriveFolder)
       newErrors.workdriveFolder = "Workdrive folder ID field is required.";
@@ -235,7 +199,6 @@ function TemplateEditorDialog({
 
   const handleClose = () => {
     setTemplateName("");
-    setModuleName(null);
     setPasswordField(null);
     setWorkdriveFolder(null);
     setFields([createField()]);
@@ -285,25 +248,12 @@ function TemplateEditorDialog({
             >
               Module Name
             </Typography>
-            <Autocomplete
-              options={modules}
-              value={moduleName}
-              onChange={(_, val) => {
-                setModuleName(val);
-                setErrors((p) => ({ ...p, moduleName: undefined }));
-              }}
-              loading={modulesLoading}
-              isOptionEqualToValue={(option, val) => option.value === val.value}
+            <TextField
+              fullWidth
               size="small"
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  placeholder="Select a module"
-                  error={!!errors.moduleName}
-                  helperText={errors.moduleName}
-                  sx={{ mt: 0.5 }}
-                />
-              )}
+              value="Deals"
+              disabled
+              sx={{ mt: 0.5 }}
             />
           </Box>
         </Box>
@@ -451,9 +401,12 @@ function TemplateEditorDialog({
                   multiple
                   options={FILE_TYPE_OPTIONS}
                   value={field.fileTypes}
-                  onChange={(_, val) =>
-                    handleFieldChange(field.id, "fileTypes", val)
-                  }
+                  onChange={(_, val) => {
+                    handleFieldChange(field.id, "fileTypes", val);
+                    if (val.includes("PDF")) {
+                      handleFieldChange(field.id, "scanType", "Single");
+                    }
+                  }}
                   size="small"
                   disableCloseOnSelect
                   slotProps={{ chip: { size: "small" } }}
@@ -468,21 +421,23 @@ function TemplateEditorDialog({
                   sx={{ flex: 1 }}
                 />
 
-                <TextField
-                  type="number"
-                  size="small"
-                  label="Upload Count"
-                  value={field.uploadCount}
+                <Select
+                  value={field.scanType}
                   onChange={(e) =>
-                    handleFieldChange(
-                      field.id,
-                      "uploadCount",
-                      Math.max(1, Number(e.target.value)),
-                    )
+                    handleFieldChange(field.id, "scanType", e.target.value)
                   }
-                  slotProps={{ htmlInput: { min: 1 } }}
-                  sx={{ width: 130 }}
-                />
+                  disabled={field.fileTypes.includes("PDF")}
+                  size="small"
+                  variant="standard"
+                  disableUnderline
+                  sx={{ fontSize: 13, color: "text.secondary", minWidth: 100 }}
+                >
+                  {["Single", "Front & Back"].map((opt) => (
+                    <MenuItem key={opt} value={opt} sx={{ fontSize: 13 }}>
+                      {opt}
+                    </MenuItem>
+                  ))}
+                </Select>
 
                 <Select
                   value={field.requirement}
