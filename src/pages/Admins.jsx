@@ -582,11 +582,12 @@ function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, on
       </Typography>
     );
   }
+  const COL_WIDTHS = { "Document Name": "auto", "Submitted On": 130, Status: 150, Actions: 100 };
   return (
-    <Table size="small" sx={{ bgcolor: "white", borderRadius: 1, overflow: "hidden" }}>
+    <Table size="small" sx={{ bgcolor: "white", borderRadius: 1, overflow: "hidden", tableLayout: "fixed", width: "100%" }}>
       <TableHead>
         <TableRow>
-          {["Document Name", "Status", "Actions"].map((h) => (
+          {["Document Name", "Submitted On", "Status", "Actions"].map((h) => (
             <TableCell
               key={h}
               sx={{
@@ -595,6 +596,7 @@ function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, on
                 color: "#1b3a6b",
                 borderBottom: "2px solid #e0e4ea",
                 whiteSpace: "nowrap",
+                width: COL_WIDTHS[h],
               }}
             >
               {h}
@@ -605,8 +607,16 @@ function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, on
       <TableBody>
         {uploads.map((upload, idx) => (
           <TableRow key={idx} hover>
-            <TableCell sx={{ color: "#333", borderBottom: "1px solid #e0e4ea" }}>
+            <TableCell sx={{ color: "#333", borderBottom: "1px solid #e0e4ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {upload.Document_Name ?? "—"}
+            </TableCell>
+            <TableCell sx={{ color: "#555", borderBottom: "1px solid #e0e4ea", whiteSpace: "nowrap" }}>
+              {upload.Created_Time
+                ? new Date(upload.Created_Time).toLocaleDateString("en-GB", {
+                    day: "2-digit", month: "short", year: "numeric",
+                    timeZone: "Europe/Madrid",
+                  })
+                : "—"}
             </TableCell>
             <TableCell sx={{ borderBottom: "1px solid #e0e4ea" }}>
               <StatusBadge status={upload.Approval_Status} />
