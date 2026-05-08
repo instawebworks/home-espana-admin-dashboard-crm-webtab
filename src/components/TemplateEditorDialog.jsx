@@ -24,6 +24,11 @@ const REQUIREMENT_OPTIONS = ["Required", "Optional"];
 
 const FILE_TYPE_OPTIONS = ["PDF", "PNG", "JPG", "JPEG"];
 
+const TAX_RESIDENCY_OPTIONS = [
+  "UK", "Ireland", "Spain", "Germany", "Switzerland",
+  "Netherlands", "Belgium", "France", "USA", "Sweden", "Norway", "Others",
+];
+
 function createField() {
   return {
     id: Date.now() + Math.random(),
@@ -47,6 +52,7 @@ function TemplateEditorDialog({
   const [moduleName] = useState({ label: "Deals", value: "Deals" });
   const [passwordField, setPasswordField] = useState(null);
   const [workdriveFolder, setWorkdriveFolder] = useState(null);
+  const [taxResidency, setTaxResidency] = useState("");
   const [fields, setFields] = useState([createField()]);
   const [moduleFields, setModuleFields] = useState([]);
   const [moduleFieldsLoading, setModuleFieldsLoading] = useState(false);
@@ -67,6 +73,7 @@ function TemplateEditorDialog({
         : editRecord.Template_JSON;
 
     setTemplateName(parsed.templateName || editRecord.Name || "");
+    setTaxResidency(parsed.taxResidency || "");
     setFields(
       parsed.documentRequirements?.length
         ? parsed.documentRequirements
@@ -104,8 +111,8 @@ function TemplateEditorDialog({
         }));
         setModuleFields(mapped);
 
-        // Restore pending values from edit mode
         if (pendingFieldsRef.current) {
+          // Restore saved values in edit mode
           const { passwordField: pf, workdriveFolder: wf } =
             pendingFieldsRef.current;
           if (pf) {
@@ -117,6 +124,12 @@ function TemplateEditorDialog({
             if (match) setWorkdriveFolder(match);
           }
           pendingFieldsRef.current = null;
+        } else {
+          // Auto-populate defaults for new template
+          const defaultPassword = mapped.find((f) => f.label === "Portal Password");
+          const defaultFolder = mapped.find((f) => f.label === "Workdrive Folder ID (EXT)");
+          if (defaultPassword) setPasswordField(defaultPassword);
+          if (defaultFolder) setWorkdriveFolder(defaultFolder);
         }
       } catch (err) {
         console.error("Failed to fetch fields", err);
@@ -149,6 +162,8 @@ function TemplateEditorDialog({
     if (!passwordField) newErrors.passwordField = "Password field is required.";
     if (!workdriveFolder)
       newErrors.workdriveFolder = "Workdrive folder ID field is required.";
+    if (!taxResidency)
+      newErrors.taxResidency = "Allowed for Country is required.";
     if (fields.some((f) => !f.name.trim()))
       newErrors.fieldNames =
         "All document requirement fields must have a name.";
@@ -163,12 +178,14 @@ function TemplateEditorDialog({
       Module_Name: moduleName?.label,
       Password_Field: passwordField?.label,
       Workdrive_Folder_ID_FIeld: workdriveFolder?.label,
+      Allowed_For_Country: taxResidency,
       Template_Status: "Active",
       Template_JSON: {
         templateName,
         moduleName,
         passwordField,
         workdriveFolder,
+        taxResidency,
         documentRequirements: fields,
       },
     };
@@ -201,6 +218,7 @@ function TemplateEditorDialog({
     setTemplateName("");
     setPasswordField(null);
     setWorkdriveFolder(null);
+    setTaxResidency("");
     setFields([createField()]);
     setErrors({});
     pendingFieldsRef.current = null;
@@ -332,6 +350,39 @@ function TemplateEditorDialog({
               )}
             />
           </Box>
+        </Box>
+
+        {/* Row 3: Client Tax Residency */}
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="caption" color="text.secondary" fontWeight={500}>
+            Allowed for Country
+          </Typography>
+          <Select
+            fullWidth
+            size="small"
+            displayEmpty
+            value={taxResidency}
+            onChange={(e) => {
+              setTaxResidency(e.target.value);
+              setErrors((p) => ({ ...p, taxResidency: undefined }));
+            }}
+            error={!!errors.taxResidency}
+            sx={{ mt: 0.5 }}
+          >
+            <MenuItem value="">
+              <em style={{ color: "#aaa" }}>Select a country</em>
+            </MenuItem>
+            {TAX_RESIDENCY_OPTIONS.map((opt) => (
+              <MenuItem key={opt} value={opt}>
+                {opt}
+              </MenuItem>
+            ))}
+          </Select>
+          {errors.taxResidency && (
+            <Typography variant="caption" color="error" sx={{ mt: 0.5, display: "block" }}>
+              {errors.taxResidency}
+            </Typography>
+          )}
         </Box>
 
         {/* Document Requirements */}
