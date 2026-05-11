@@ -21,6 +21,7 @@ import {
 import { useState, useEffect, useRef, Fragment } from "react";
 import CloseIcon from "@mui/icons-material/Close";
 import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
+import SendRoundedIcon from "@mui/icons-material/SendRounded";
 
 const ZOHO = window.ZOHO;
 const ZOHO_BASE = "https://crm.zoho.eu";
@@ -129,6 +130,7 @@ function ReviewDocumentDialog({
   attachment,
   onStatusUpdate,
   workdriveFolderId,
+  viewOnly,
 }) {
   const [docUrl, setDocUrl] = useState(null);
   const [docLoading, setDocLoading] = useState(false);
@@ -142,7 +144,7 @@ function ReviewDocumentDialog({
   const isPdf = ext === "pdf";
   const currentStatus = upload?.Approval_Status;
   const isDecided =
-    currentStatus === "Approved" || currentStatus === "Rejected";
+    viewOnly || currentStatus === "Approved" || currentStatus === "Rejected";
 
   useEffect(() => {
     if (open) {
@@ -547,30 +549,33 @@ function ReviewDocumentDialog({
 
 // ─── Checklist Upload View ────────────────────────────────────────────────
 
+function getSideStatus(uploads) {
+  if (!uploads.length) return "Missing";
+  if (uploads.some((u) => u.Approval_Status === "Approved")) return "Approved";
+  if (uploads.some((u) => u.Approval_Status === "Pending")) return "Pending";
+  return "Rejected";
+}
+
 function getReqStatus(req, uploads) {
   const matching = uploads.filter((u) => u.Document_Type === req.name);
   const scanType = req.scanType ?? "Single";
 
   if (scanType === "Front & Back") {
-    const frontOk = matching.some(
-      (u) => u.Scan_Type === "Front" && u.Approval_Status === "Approved",
-    );
-    const backOk = matching.some(
-      (u) => u.Scan_Type === "Back" && u.Approval_Status === "Approved",
-    );
-    if (frontOk && backOk) return "Approved";
-    if (matching.some((u) => u.Approval_Status === "Rejected")) return "Rejected";
     if (matching.length === 0) return "Missing";
+    const frontStatus = getSideStatus(matching.filter((u) => u.Scan_Type === "Front"));
+    const backStatus = getSideStatus(matching.filter((u) => u.Scan_Type === "Back"));
+    if (frontStatus === "Approved" && backStatus === "Approved") return "Approved";
+    if (matching.every((u) => u.Approval_Status === "Rejected")) return "Rejected";
     return "Pending";
   }
 
-  if (matching.some((u) => u.Approval_Status === "Approved")) return "Approved";
-  if (matching.some((u) => u.Approval_Status === "Rejected")) return "Rejected";
   if (matching.length === 0) return "Missing";
-  return "Pending";
+  if (matching.some((u) => u.Approval_Status === "Approved")) return "Approved";
+  if (matching.some((u) => u.Approval_Status === "Pending")) return "Pending";
+  return "Rejected";
 }
 
-function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, onReview }) {
+function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, onReview, viewOnly }) {
   if (!uploads.length) {
     return (
       <Typography
@@ -633,6 +638,7 @@ function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, on
                     attachment: attachMap[upload.Attachment_ID] ?? null,
                     workdriveFolderId:
                       relatedRecord?.easyworkdriveforcrm__Workdrive_Folder_ID_EXT ?? null,
+                    viewOnly: viewOnly ?? false,
                   })
                 }
                 sx={{
@@ -722,26 +728,34 @@ function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRe
             <Box sx={{ p: 1.5 }}>
               {scanType === "Front & Back" ? (
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-                  {["Front", "Back"].map((side) => (
-                    <Box key={side}>
-                      <Typography
-                        fontSize={11}
-                        fontWeight={700}
-                        color="#6b7280"
-                        sx={{ mb: 0.5, textTransform: "uppercase", letterSpacing: 0.5 }}
-                      >
-                        {side}
-                      </Typography>
-                      <UploadSubTable
-                        uploads={matching.filter((u) => u.Scan_Type === side)}
-                        allUploads={uploads}
-                        attachMap={attachMap}
-                        row={row}
-                        relatedRecord={relatedRecord}
-                        onReview={onReview}
-                      />
-                    </Box>
-                  ))}
+                  {["Front", "Back"].map((side) => {
+                    const sideUploads = matching.filter((u) => u.Scan_Type === side);
+                    const sideStatus = getSideStatus(sideUploads);
+                    return (
+                      <Box key={side}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+                          <Typography
+                            fontSize={11}
+                            fontWeight={700}
+                            color="#6b7280"
+                            sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}
+                          >
+                            {side}
+                          </Typography>
+                          <StatusBadge status={sideStatus} />
+                        </Box>
+                        <UploadSubTable
+                          uploads={sideUploads}
+                          allUploads={uploads}
+                          attachMap={attachMap}
+                          row={row}
+                          relatedRecord={relatedRecord}
+                          onReview={onReview}
+                          viewOnly={sideStatus === "Approved"}
+                        />
+                      </Box>
+                    );
+                  })}
                 </Box>
               ) : (
                 <UploadSubTable
@@ -751,6 +765,7 @@ function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRe
                   row={row}
                   relatedRecord={relatedRecord}
                   onReview={onReview}
+                  viewOnly={getSideStatus(matching) === "Approved"}
                 />
               )}
             </Box>
@@ -770,10 +785,13 @@ function Admins({ submissionLogs, onRefresh }) {
   const [attachmentsCache, setAttachmentsCache] = useState({}); // { recordId: { attachmentId: attachment } }
   const [notesCache, setNotesCache] = useState({}); // { recordId: note[] }
   const [relatedRecordCache, setRelatedRecordCache] = useState({}); // { recordId: related module record }
-  const [templateCache, setTemplateCache] = useState({}); // { templateId: parsedTemplateJSON }
-  const templateCacheRef = useRef({});
+  const [templateCache, setTemplateCache] = useState({}); // { submissionId: parsedTemplateJSON }
   const [loadingId, setLoadingId] = useState(null);
   const [reviewDialog, setReviewDialog] = useState(null); // { upload, parentRow, attachment }
+  const [adminComments, setAdminComments] = useState({}); // { rowId: string }
+  const [commentSubmitting, setCommentSubmitting] = useState({}); // { rowId: bool }
+  const reviewDialogSnapshot = useRef(null);
+  if (reviewDialog) reviewDialogSnapshot.current = reviewDialog;
 
   const handleToggle = async (row) => {
     if (expandedId === row.id) {
@@ -785,9 +803,8 @@ function Admins({ submissionLogs, onRefresh }) {
     if (uploadsCache[row.id]) return;
     setLoadingId(row.id);
     try {
-      // Fetch subform uploads, CRM attachments, notes, related record, and template in parallel
-      const templateId = row.Template_ID;
-      const [recordResp, attachResp, notesResp, relatedResp, templateResp] =
+      // Fetch subform uploads, CRM attachments, notes, and related Deal record in parallel
+      const [recordResp, attachResp, notesResp, relatedResp] =
         await Promise.all([
           ZOHO.CRM.API.getRecord({
             Entity: "Submission_Logs",
@@ -813,12 +830,6 @@ function Admins({ submissionLogs, onRefresh }) {
                 RecordID: row.Related_Record_ID,
               })
             : Promise.resolve(null),
-          templateId && !templateCacheRef.current[templateId]
-            ? ZOHO.CRM.API.getRecord({
-                Entity: "Document_Templates",
-                RecordID: templateId,
-              })
-            : Promise.resolve(null),
         ]);
 
       const uploads = recordResp?.data?.[0]?.Document_Uploads ?? [];
@@ -832,15 +843,16 @@ function Admins({ submissionLogs, onRefresh }) {
       setUploadsCache((prev) => ({ ...prev, [row.id]: uploads }));
       setAttachmentsCache((prev) => ({ ...prev, [row.id]: attachMap }));
       setNotesCache((prev) => ({ ...prev, [row.id]: notesResp?.data ?? [] }));
-      setRelatedRecordCache((prev) => ({
-        ...prev,
-        [row.id]: relatedResp?.data?.[0] ?? null,
-      }));
+      const dealRecord = relatedResp?.data?.[0] ?? null;
+      setRelatedRecordCache((prev) => ({ ...prev, [row.id]: dealRecord }));
 
-      if (templateResp?.data?.[0]?.Template_JSON) {
-        const parsed = JSON.parse(templateResp.data[0].Template_JSON);
-        templateCacheRef.current[templateId] = parsed;
-        setTemplateCache((prev) => ({ ...prev, [templateId]: parsed }));
+      const additionalJson = dealRecord?.Additional_Template_JSON;
+      if (additionalJson) {
+        const parsed =
+          typeof additionalJson === "string"
+            ? JSON.parse(additionalJson)
+            : additionalJson;
+        setTemplateCache((prev) => ({ ...prev, [row.id]: parsed }));
       }
     } catch (err) {
       console.error("Failed to fetch record data", err);
@@ -871,6 +883,41 @@ function Admins({ submissionLogs, onRefresh }) {
           : u,
       ),
     }));
+  };
+
+  const handleAdminComment = async (row) => {
+    const content = (adminComments[row.id] ?? "").trim();
+    if (!content) return;
+    setCommentSubmitting((prev) => ({ ...prev, [row.id]: true }));
+    try {
+      const resp = await ZOHO.CRM.API.insertRecord({
+        Entity: "Notes",
+        APIData: {
+          Parent_Id: row.id,
+          se_module: "Submission_Logs",
+          Note_Title: "Admin Note",
+          Note_Content: content,
+        },
+        Trigger: [],
+      });
+      if (resp?.data?.[0]?.code === "SUCCESS") {
+        const newNote = {
+          id: resp.data[0].details.id,
+          Note_Title: "Admin Note",
+          Note_Content: content,
+          Created_Time: new Date().toISOString(),
+        };
+        setNotesCache((prev) => ({
+          ...prev,
+          [row.id]: [...(prev[row.id] ?? []), newNote],
+        }));
+        setAdminComments((prev) => ({ ...prev, [row.id]: "" }));
+      }
+    } catch (err) {
+      console.error("Failed to add admin note", err);
+    } finally {
+      setCommentSubmitting((prev) => ({ ...prev, [row.id]: false }));
+    }
   };
 
   const totalCols = COLUMNS.length + 1;
@@ -941,7 +988,7 @@ function Admins({ submissionLogs, onRefresh }) {
                 const uploads = uploadsCache[row.id] ?? [];
                 const attachMap = attachmentsCache[row.id] ?? {};
                 const notes = notesCache[row.id] ?? [];
-                const template = templateCache[row.Template_ID] ?? null;
+                const template = templateCache[row.id] ?? null;
 
                 return (
                   <Fragment key={row.id}>
@@ -1052,123 +1099,153 @@ function Admins({ submissionLogs, onRefresh }) {
                               )
                             ) : (
                               /* ── User Messages tab ── */
-                              <Box
-                                sx={{
-                                  bgcolor: "white",
-                                  border: "1px solid #e0e4ea",
-                                  borderRadius: 1,
-                                  p: 2,
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: 2,
-                                  maxHeight: 320,
-                                  overflowY: "auto",
-                                }}
-                              >
-                                {notes.length ? (
-                                  notes.map((note) => (
-                                    <Box
-                                      key={note.id}
-                                      sx={{
-                                        display: "flex",
-                                        gap: 1.5,
-                                        alignItems: "flex-start",
-                                      }}
-                                    >
-                                      {/* Avatar */}
-                                      <Box
-                                        sx={{
-                                          width: 34,
-                                          height: 34,
-                                          borderRadius: "50%",
-                                          bgcolor: "#1b3a6b",
-                                          color: "white",
-                                          display: "flex",
-                                          alignItems: "center",
-                                          justifyContent: "center",
-                                          fontSize: 13,
-                                          fontWeight: 700,
-                                          flexShrink: 0,
-                                          mt: 0.25,
-                                        }}
-                                      >
-                                        {(row.Client_Name ??
-                                          "?")[0].toUpperCase()}
-                                      </Box>
-
-                                      {/* Bubble */}
-                                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                                {/* Scrollable notes list */}
+                                <Box
+                                  sx={{
+                                    bgcolor: "white",
+                                    border: "1px solid #e0e4ea",
+                                    borderRadius: 1,
+                                    p: 2,
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: 2,
+                                    maxHeight: 280,
+                                    overflowY: "auto",
+                                  }}
+                                >
+                                  {notes.length ? (
+                                    [...notes]
+                                      .sort((a, b) => new Date(a.Created_Time) - new Date(b.Created_Time))
+                                      .map((note) => {
+                                      const isAdmin = note.Note_Title === "Admin Note";
+                                      return (
                                         <Box
+                                          key={note.id}
                                           sx={{
                                             display: "flex",
-                                            alignItems: "baseline",
-                                            gap: 1,
-                                            mb: 0.5,
+                                            flexDirection: isAdmin ? "row-reverse" : "row",
+                                            gap: 1.5,
+                                            alignItems: "flex-start",
                                           }}
                                         >
-                                          <Typography
-                                            fontWeight={700}
-                                            fontSize={13}
-                                            color="#1b3a6b"
-                                            noWrap
-                                          >
-                                            {row.Client_Name ?? "Unknown"}
-                                          </Typography>
-                                          <Typography
-                                            fontSize={11}
-                                            color="text.secondary"
-                                            flexShrink={0}
-                                          >
-                                            {note.Created_Time
-                                              ? formatNoteTime(
-                                                  note.Created_Time,
-                                                )
-                                              : "—"}
-                                          </Typography>
-                                        </Box>
-                                        <Box
-                                          sx={{
-                                            bgcolor: "#eef3ff",
-                                            border: "1px solid #d0ddf7",
-                                            borderRadius: "0 10px 10px 10px",
-                                            px: 1.75,
-                                            py: 1,
-                                          }}
-                                        >
-                                          {note.Note_Title && (
-                                            <Typography
-                                              fontSize={11}
-                                              fontWeight={700}
-                                              color="#1b3a6b"
-                                              mb={0.25}
-                                            >
-                                              {note.Note_Title}
-                                            </Typography>
-                                          )}
-                                          <Typography
-                                            fontSize={13}
-                                            color="#333"
+                                          {/* Avatar */}
+                                          <Box
                                             sx={{
-                                              whiteSpace: "pre-wrap",
-                                              wordBreak: "break-word",
+                                              width: 34,
+                                              height: 34,
+                                              borderRadius: "50%",
+                                              bgcolor: isAdmin ? "#4f46e5" : "#1b3a6b",
+                                              color: "white",
+                                              display: "flex",
+                                              alignItems: "center",
+                                              justifyContent: "center",
+                                              fontSize: 13,
+                                              fontWeight: 700,
+                                              flexShrink: 0,
+                                              mt: 0.25,
                                             }}
                                           >
-                                            {note.Note_Content ?? "—"}
-                                          </Typography>
+                                            {isAdmin ? "A" : (row.Client_Name ?? "?")[0].toUpperCase()}
+                                          </Box>
+
+                                          {/* Bubble */}
+                                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                                            <Box
+                                              sx={{
+                                                display: "flex",
+                                                alignItems: "baseline",
+                                                gap: 1,
+                                                mb: 0.5,
+                                                flexDirection: isAdmin ? "row-reverse" : "row",
+                                              }}
+                                            >
+                                              <Typography fontWeight={700} fontSize={13} color={isAdmin ? "#4f46e5" : "#1b3a6b"} noWrap>
+                                                {isAdmin ? "Admin" : (row.Client_Name ?? "Unknown")}
+                                              </Typography>
+                                              <Typography fontSize={11} color="text.secondary" flexShrink={0}>
+                                                {note.Created_Time ? formatNoteTime(note.Created_Time) : "—"}
+                                              </Typography>
+                                            </Box>
+                                            <Box
+                                              sx={{
+                                                bgcolor: isAdmin ? "#f5f3ff" : "#eef3ff",
+                                                border: `1px solid ${isAdmin ? "#ddd6fe" : "#d0ddf7"}`,
+                                                borderRadius: isAdmin ? "10px 0 10px 10px" : "0 10px 10px 10px",
+                                                px: 1.75,
+                                                py: 1,
+                                              }}
+                                            >
+                                              <Typography
+                                                fontSize={13}
+                                                color="#333"
+                                                sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                                              >
+                                                {note.Note_Content ?? "—"}
+                                              </Typography>
+                                            </Box>
+                                          </Box>
                                         </Box>
-                                      </Box>
-                                    </Box>
-                                  ))
-                                ) : (
-                                  <Typography
-                                    variant="body2"
-                                    color="text.secondary"
-                                    textAlign="center"
-                                    py={2}
+                                      );
+                                    })
+                                  ) : (
+                                    <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
+                                      No messages found.
+                                    </Typography>
+                                  )}
+                                </Box>
+
+                                {/* Admin reply input */}
+                                <Box
+                                  sx={{
+                                    display: "flex",
+                                    gap: 1,
+                                    alignItems: "flex-end",
+                                    bgcolor: "white",
+                                    border: "1px solid #e0e4ea",
+                                    borderRadius: 1,
+                                    px: 1.5,
+                                    py: 1,
+                                  }}
+                                >
+                                  <TextField
+                                    multiline
+                                    maxRows={4}
+                                    fullWidth
+                                    size="small"
+                                    placeholder="Write a note to add to this submission..."
+                                    value={adminComments[row.id] ?? ""}
+                                    onChange={(e) =>
+                                      setAdminComments((prev) => ({ ...prev, [row.id]: e.target.value }))
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleAdminComment(row);
+                                      }
+                                    }}
+                                    variant="standard"
+                                    slotProps={{ input: { disableUnderline: true } }}
+                                    sx={{ flex: 1 }}
+                                  />
+                                  <IconButton
+                                    onClick={() => handleAdminComment(row)}
+                                    disabled={
+                                      !adminComments[row.id]?.trim() ||
+                                      !!commentSubmitting[row.id]
+                                    }
+                                    sx={{
+                                      color: "#4f46e5",
+                                      "&:disabled": { color: "#d1d5db" },
+                                      mb: 0.25,
+                                    }}
                                   >
-                                    No messages found.
-                                  </Typography>
-                                )}
+                                    {commentSubmitting[row.id]
+                                      ? <CircularProgress size={18} sx={{ color: "#4f46e5" }} />
+                                      : <SendRoundedIcon fontSize="small" />
+                                    }
+                                  </IconButton>
+                                </Box>
                               </Box>
                             )}
                           </Box>
@@ -1196,12 +1273,13 @@ function Admins({ submissionLogs, onRefresh }) {
       <ReviewDocumentDialog
         open={!!reviewDialog}
         onClose={() => setReviewDialog(null)}
-        upload={reviewDialog?.upload}
-        parentRow={reviewDialog?.parentRow}
-        allUploads={reviewDialog?.allUploads}
-        attachment={reviewDialog?.attachment}
+        upload={reviewDialogSnapshot.current?.upload}
+        parentRow={reviewDialogSnapshot.current?.parentRow}
+        allUploads={reviewDialogSnapshot.current?.allUploads}
+        attachment={reviewDialogSnapshot.current?.attachment}
         onStatusUpdate={handleStatusUpdate}
-        workdriveFolderId={reviewDialog?.workdriveFolderId}
+        workdriveFolderId={reviewDialogSnapshot.current?.workdriveFolderId}
+        viewOnly={reviewDialogSnapshot.current?.viewOnly ?? false}
       />
     </Box>
   );
