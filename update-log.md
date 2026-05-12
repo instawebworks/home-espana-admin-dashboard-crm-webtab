@@ -1,15 +1,12 @@
 # Project Update Log
 
-| Change / Update                                                                                                                                                                                                                                                                                                                           | Claude Time | Avg Dev Time |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------ |
-| Fetched picklist options for `Client_s_Tax_Residency` field in Deals module via Zoho CRM metadata API                                                                                                                                                                                                                                     | ~5 min      | ~5 min       |
-| Added "Allowed for Country" single-select picklist to Checklist Template Editor (create & edit), wired to `Allowed_For_Country` CRM field, saved in `Template_JSON`, restored in edit mode                                                                                                                                                | ~4 min      | ~25 min      |
-| Made "Allowed for Country" field mandatory with inline validation error                                                                                                                                                                                                                                                                   | ~2 min      | ~10 min      |
-| Auto-populate Password Field ("Portal Password") and Workdrive Folder ID Field ("Workdrive Folder ID (EXT)") when opening a new template — edit mode unaffected                                                                                                                                                                           | ~2 min      | ~15 min      |
-| Investigated per-document grouping + Front/Back split in admin uploads view — confirmed both are already fully implemented in `Admins.jsx` (`ChecklistUploadsView`). Root cause of screenshot discrepancy: template's Passport entry has `scanType: "Single"` instead of `"Front & Back"` — code is correct, template data needs updating | ~8 min      | ~30 min      |
-| Switched document requirements source from `Template_JSON` (Document_Templates module) to `Additional_Template_JSON` (Deal record) — dropped the separate template fetch, read directly from the already-fetched Deal record, re-keyed template cache by submission ID                                                                    | ~3 min      | ~20 min      |
-
-| Added per-side status badges (Front/Back) in admin uploads view; updated status logic — Approved > Pending > Rejected > Missing for sides and single docs; overall Front & Back doc approved only when both sides are Approved | ~4 min | ~20 min |
-| Made all uploads in a group view-only when the group is approved (side or single doc) — group approval locks every submission in that table regardless of individual status | ~4 min | ~20 min |
-| Fixed approve/reject buttons flashing during dialog close animation — used a ref snapshot so dialog props stay frozen at their last non-null values throughout the MUI close transition | ~2 min | ~15 min |
-| Added admin reply chatbox to User Messages tab — multiline input with Send button (Enter to send, Shift+Enter for newline), posts note via `ZOHO.CRM.API.addNote`, appended to notes cache instantly; admin notes render right-aligned with distinct purple styling | ~6 min | ~40 min |
+| Change / Update | Claude Time | Avg Dev Time |
+|---|---|---|
+| Set dev server to always use port 3002 (added `set PORT=3002` to start script in package.json) | 1 min | 2 min |
+| Added Deal Owner filter dropdown above the Client Submissions table; derives unique owners from loaded records and filters table rows in real time | 5 min | 20 min |
+| Widened Deal Owner filter dropdown from 220px to 300px | <1 min | 1 min |
+| Added Deal Name column to submissions table; fetches deal names in parallel using Related_Record_ID after logs load, caches in a map, truncates with ellipsis at 200px max width | 6 min | 25 min |
+| Moved Deal Name to first column; made it a clickable link opening the deal in a new tab using the org ID extracted from window.location | 3 min | 10 min |
+| Fixed Deal Name link — hardcoded org ID and used Potentials (internal module name), added ?redirect=false | 2 min | 5 min |
+| Updated Deal Name link to use canvas layout URL format (fixed canvas ID, only deal ID changes per row) | 1 min | 2 min |
+| Added debounce-based deal name search field; instantly filters current list, fires API search after 500ms for deals outside the loaded 200 and merges results | 10 min | 45 min |

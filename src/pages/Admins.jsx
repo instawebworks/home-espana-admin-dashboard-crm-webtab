@@ -17,16 +17,23 @@ import {
   IconButton,
   Tabs,
   Tab,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  InputAdornment,
 } from "@mui/material";
-import { useState, useEffect, useRef, Fragment } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import CloseIcon from "@mui/icons-material/Close";
 import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
+import SearchIcon from "@mui/icons-material/Search";
 
 const ZOHO = window.ZOHO;
 const ZOHO_BASE = "https://crm.zoho.eu";
 
 const COLUMNS = [
+  { label: "Deal Name", key: "_deal_name", maxWidth: 200 },
   { label: "Client Name", key: "Client_Name" },
   { label: "Client Email", key: "Client_Email" },
   { label: "Related Module", key: "Related_Module_Name" },
@@ -34,6 +41,9 @@ const COLUMNS = [
   { label: "Doc Uploads", key: "_doc_uploads" },
   { label: "Modified Time", key: "Modified_Time" },
 ];
+
+const DEAL_CANVAS_SUFFIX = "/canvas/434889000031449238";
+const DEAL_URL_BASE = "https://crm.zoho.eu/crm/org20080353658/tab/Potentials";
 
 
 const STATUS_STYLES = {
@@ -781,6 +791,12 @@ function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRe
 function Admins({ submissionLogs, onRefresh }) {
   const [expandedId, setExpandedId] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
+  const [dealOwnerFilter, setDealOwnerFilter] = useState("");
+  const [dealNamesMap, setDealNamesMap] = useState({}); // { dealId: dealName }
+  const [dealNameSearch, setDealNameSearch] = useState("");
+  const [extraSearchLogs, setExtraSearchLogs] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchDebounceRef = useRef(null);
   const [uploadsCache, setUploadsCache] = useState({}); // { recordId: upload[] }
   const [attachmentsCache, setAttachmentsCache] = useState({}); // { recordId: { attachmentId: attachment } }
   const [notesCache, setNotesCache] = useState({}); // { recordId: note[] }
@@ -792,6 +808,29 @@ function Admins({ submissionLogs, onRefresh }) {
   const [commentSubmitting, setCommentSubmitting] = useState({}); // { rowId: bool }
   const reviewDialogSnapshot = useRef(null);
   if (reviewDialog) reviewDialogSnapshot.current = reviewDialog;
+
+  useEffect(() => {
+    if (!submissionLogs?.length) return;
+    const uniqueIds = [
+      ...new Set(
+        submissionLogs
+          .filter((r) => r.Related_Module_Name === "Deals" && r.Related_Record_ID)
+          .map((r) => r.Related_Record_ID),
+      ),
+    ];
+    if (!uniqueIds.length) return;
+    Promise.all(
+      uniqueIds.map((id) =>
+        ZOHO.CRM.API.getRecord({ Entity: "Deals", RecordID: id })
+          .then((resp) => ({ id, name: resp?.data?.[0]?.Deal_Name ?? "—" }))
+          .catch(() => ({ id, name: "—" })),
+      ),
+    ).then((results) => {
+      const map = {};
+      results.forEach(({ id, name }) => { map[id] = name; });
+      setDealNamesMap(map);
+    });
+  }, [submissionLogs]);
 
   const handleToggle = async (row) => {
     if (expandedId === row.id) {
@@ -920,6 +959,80 @@ function Admins({ submissionLogs, onRefresh }) {
     }
   };
 
+  const dealOwners = useMemo(() => {
+    if (!submissionLogs) return [];
+    const seen = new Set();
+    return submissionLogs
+      .map((r) => ({ id: r.Owner?.id, name: r.Owner?.name }))
+      .filter((o) => o.id && !seen.has(o.id) && seen.add(o.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [submissionLogs]);
+
+  const ownerFilteredLogs = useMemo(() => {
+    if (!submissionLogs) return [];
+    if (!dealOwnerFilter) return submissionLogs;
+    return submissionLogs.filter((r) => r.Owner?.id === dealOwnerFilter);
+  }, [submissionLogs, dealOwnerFilter]);
+
+  const filteredLogs = useMemo(() => {
+    const term = dealNameSearch.trim().toLowerCase();
+    if (!term) return ownerFilteredLogs;
+    const localMatches = ownerFilteredLogs.filter((r) =>
+      (dealNamesMap[r.Related_Record_ID] ?? "").toLowerCase().includes(term),
+    );
+    const localIds = new Set(localMatches.map((r) => r.id));
+    const extra = extraSearchLogs.filter((r) => !localIds.has(r.id));
+    return [...localMatches, ...extra];
+  }, [ownerFilteredLogs, dealNamesMap, dealNameSearch, extraSearchLogs]);
+
+  const handleDealNameSearch = (value) => {
+    setDealNameSearch(value);
+    clearTimeout(searchDebounceRef.current);
+    if (!value.trim()) {
+      setExtraSearchLogs([]);
+      setSearchLoading(false);
+      return;
+    }
+    searchDebounceRef.current = setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const dealResp = await ZOHO.CRM.API.searchRecord({
+          Entity: "Deals",
+          Type: "criteria",
+          Query: `(Deal_Name:contains:${value.trim()})`,
+        });
+        const deals = dealResp?.data ?? [];
+        const existingDealIds = new Set(
+          submissionLogs?.map((r) => r.Related_Record_ID) ?? [],
+        );
+        const newDeals = deals.filter((d) => !existingDealIds.has(d.id));
+        const newLogs = await Promise.all(
+          newDeals.map(async (deal) => {
+            try {
+              const logResp = await ZOHO.CRM.API.searchRecord({
+                Entity: "Submission_Logs",
+                Type: "criteria",
+                Query: `(Related_Record_ID:equals:${deal.id})`,
+              });
+              const logs = logResp?.data ?? [];
+              if (logs.length) {
+                setDealNamesMap((prev) => ({ ...prev, [deal.id]: deal.Deal_Name }));
+              }
+              return logs;
+            } catch {
+              return [];
+            }
+          }),
+        );
+        setExtraSearchLogs(newLogs.flat());
+      } catch (err) {
+        console.error("Deal search failed", err);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 500);
+  };
+
   const totalCols = COLUMNS.length + 1;
 
   return (
@@ -938,9 +1051,51 @@ function Admins({ submissionLogs, onRefresh }) {
       <Typography variant="h6" fontWeight={600}>
         Client Submissions
       </Typography>
-      <Typography variant="body2" color="text.secondary" mt={0.5} mb={2}>
+      <Typography variant="body2" color="text.secondary" mt={0.5} mb={1.5}>
         Latest 200 submission records from clients.
       </Typography>
+
+      {/* Filter bar */}
+      <Box sx={{ display: "flex", gap: 2, mb: 2, alignItems: "center" }}>
+        <FormControl size="small" sx={{ minWidth: 350 }}>
+          <InputLabel>Filter by Deal Owner</InputLabel>
+          <Select
+            value={dealOwnerFilter}
+            onChange={(e) => {
+              setDealOwnerFilter(e.target.value);
+              setExpandedId(null);
+            }}
+            label="Filter by Deal Owner"
+          >
+            <MenuItem value="">All Owners</MenuItem>
+            {dealOwners.map((o) => (
+              <MenuItem key={o.id} value={o.id}>
+                {o.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <TextField
+          size="small"
+          placeholder="Search by deal name..."
+          value={dealNameSearch}
+          onChange={(e) => handleDealNameSearch(e.target.value)}
+          sx={{ width: 300 }}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  {searchLoading
+                    ? <CircularProgress size={16} sx={{ color: "#6b7280" }} />
+                    : <SearchIcon fontSize="small" sx={{ color: "#6b7280" }} />
+                  }
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+      </Box>
 
       <TableContainer
         sx={{
@@ -981,8 +1136,8 @@ function Admins({ submissionLogs, onRefresh }) {
             </TableRow>
           </TableHead>
           <TableBody>
-            {submissionLogs?.length ? (
-              submissionLogs.map((row) => {
+            {filteredLogs?.length ? (
+              filteredLogs.map((row) => {
                 const isOpen = expandedId === row.id;
                 const isLoading = loadingId === row.id;
                 const uploads = uploadsCache[row.id] ?? [];
@@ -1000,9 +1155,35 @@ function Admins({ submissionLogs, onRefresh }) {
                             color: "#333",
                             whiteSpace: "nowrap",
                             borderBottom: isOpen ? 0 : "1px solid #e0e4ea",
+                            ...(col.maxWidth && {
+                              maxWidth: col.maxWidth,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }),
                           }}
                         >
-                          {formatCell(col.key, row)}
+                          {col.key === "_deal_name" ? (
+                            row.Related_Record_ID && dealNamesMap[row.Related_Record_ID] ? (
+                              <Box
+                                component="a"
+                                href={`${DEAL_URL_BASE}/${row.Related_Record_ID}${DEAL_CANVAS_SUFFIX}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                sx={{
+                                  color: "#2d60c4",
+                                  fontWeight: 600,
+                                  textDecoration: "none",
+                                  "&:hover": { textDecoration: "underline" },
+                                  display: "block",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {dealNamesMap[row.Related_Record_ID]}
+                              </Box>
+                            ) : "—"
+                          ) : formatCell(col.key, row)}
                         </TableCell>
                       ))}
                       <TableCell
