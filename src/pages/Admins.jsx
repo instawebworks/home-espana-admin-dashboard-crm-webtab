@@ -1331,7 +1331,14 @@ function Admins({ submissionLogs, onRefresh }) {
                                           </Box>
 
                                           {/* Bubble */}
-                                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                                          <Box
+                                            sx={{
+                                              maxWidth: "70%",
+                                              display: "flex",
+                                              flexDirection: "column",
+                                              alignItems: isAdmin ? "flex-end" : "flex-start",
+                                            }}
+                                          >
                                             <Box
                                               sx={{
                                                 display: "flex",
