@@ -502,7 +502,7 @@ function TemplateEditorDialog({
                 >
                   {REQUIREMENT_OPTIONS.map((opt) => (
                     <MenuItem key={opt} value={opt} sx={{ fontSize: 13 }}>
-                      {opt}
+                      {opt === "Optional" ? "If Applicable" : opt}
                     </MenuItem>
                   ))}
                 </Select>

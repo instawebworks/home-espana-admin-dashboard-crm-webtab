@@ -12,3 +12,4 @@
 | Added debounce-based deal name search field; instantly filters current list, fires API search after 500ms for deals outside the loaded 200 and merges results | 10 min | 45 min |
 | Fixed chat bubbles in User Messages — bubbles now wrap to content width instead of stretching full row width | 2 min | 5 min |
 | Changed "Optional" label to display as "If Applicable" in admin checklist view (underlying data unchanged) | <1 min | 1 min |
+| Changed "Optional" label to display as "If Applicable" in Template Editor dialog dropdown (underlying value unchanged) | <1 min | 1 min |
