@@ -710,7 +710,7 @@ function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRe
                   border: `1px solid ${req.requirement === "Required" ? "#bfdbfe" : "#e5e7eb"}`,
                 }}
               >
-                {req.requirement}
+                {req.requirement === "Optional" ? "If Applicable" : req.requirement}
               </Box>
               {scanType === "Front & Back" && (
                 <Box
