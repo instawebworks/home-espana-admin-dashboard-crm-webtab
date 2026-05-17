@@ -22,6 +22,7 @@ import {
   FormControl,
   InputLabel,
   InputAdornment,
+  Checkbox,
 } from "@mui/material";
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import CloseIcon from "@mui/icons-material/Close";
@@ -301,7 +302,7 @@ function ReviewDocumentDialog({
             u.Approval_Status === "Approved",
         ).length;
         const seq = String(approvedCount + 1).padStart(2, "0");
-        newDocName = `${upload.Document_Type} ${seq}.${ext}`;
+        newDocName = `${upload.Document_Type} ${seq} - ${upload.Submitted_For ?? "Unknown"}.${ext}`;
 
         // Call Deluge custom function to handle binary file ops server-side
         // (download → delete → re-upload with new name → WorkDrive upload)
@@ -561,28 +562,17 @@ function ReviewDocumentDialog({
 
 function getSideStatus(uploads) {
   if (!uploads.length) return "Missing";
-  if (uploads.some((u) => u.Approval_Status === "Approved")) return "Approved";
-  if (uploads.some((u) => u.Approval_Status === "Pending")) return "Pending";
-  return "Rejected";
+  if (uploads.every((u) => u.Approval_Status === "Rejected")) return "Rejected";
+  return "Pending";
 }
 
-function getReqStatus(req, uploads) {
+function getReqStatus(req, uploads, sectionApprovals) {
+  if (sectionApprovals?.[req.name]?.section) return "Approved";
+
   const matching = uploads.filter((u) => u.Document_Type === req.name);
-  const scanType = req.scanType ?? "Single";
-
-  if (scanType === "Front & Back") {
-    if (matching.length === 0) return "Missing";
-    const frontStatus = getSideStatus(matching.filter((u) => u.Scan_Type === "Front"));
-    const backStatus = getSideStatus(matching.filter((u) => u.Scan_Type === "Back"));
-    if (frontStatus === "Approved" && backStatus === "Approved") return "Approved";
-    if (matching.every((u) => u.Approval_Status === "Rejected")) return "Rejected";
-    return "Pending";
-  }
-
   if (matching.length === 0) return "Missing";
-  if (matching.some((u) => u.Approval_Status === "Approved")) return "Approved";
-  if (matching.some((u) => u.Approval_Status === "Pending")) return "Pending";
-  return "Rejected";
+  if (matching.every((u) => u.Approval_Status === "Rejected")) return "Rejected";
+  return "Pending";
 }
 
 function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, onReview, viewOnly }) {
@@ -597,12 +587,12 @@ function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, on
       </Typography>
     );
   }
-  const COL_WIDTHS = { "Document Name": "auto", "Submitted On": 130, Status: 150, Actions: 100 };
+  const COL_WIDTHS = { "Document Name": "auto", "Submitted For": 140, "Submitted On": 130, Status: 150, Actions: 100 };
   return (
     <Table size="small" sx={{ bgcolor: "white", borderRadius: 1, overflow: "hidden", tableLayout: "fixed", width: "100%" }}>
       <TableHead>
         <TableRow>
-          {["Document Name", "Submitted On", "Status", "Actions"].map((h) => (
+          {["Document Name", "Submitted For", "Submitted On", "Status", "Actions"].map((h) => (
             <TableCell
               key={h}
               sx={{
@@ -624,6 +614,9 @@ function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, on
           <TableRow key={idx} hover>
             <TableCell sx={{ color: "#333", borderBottom: "1px solid #e0e4ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {upload.Document_Name ?? "—"}
+            </TableCell>
+            <TableCell sx={{ color: "#333", borderBottom: "1px solid #e0e4ea", whiteSpace: "nowrap" }}>
+              {upload.Submitted_For ?? "—"}
             </TableCell>
             <TableCell sx={{ color: "#555", borderBottom: "1px solid #e0e4ea", whiteSpace: "nowrap" }}>
               {upload.Created_Time
@@ -669,13 +662,26 @@ function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, on
   );
 }
 
-function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRecord, onReview }) {
+function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRecord, onReview, sectionApprovals, onSectionApprove, sectionApproveLoading }) {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
       {requirements.map((req) => {
         const scanType = req.scanType ?? "Single";
         const matching = uploads.filter((u) => u.Document_Type === req.name);
-        const overallStatus = getReqStatus(req, uploads);
+        const overallStatus = getReqStatus(req, uploads, sectionApprovals);
+        const reqApprovals = sectionApprovals?.[req.name] ?? {};
+
+        const sectionLoadingKey = `${row.id}__${req.name}__section`;
+        const isSectionApproveLoading = !!sectionApproveLoading?.[sectionLoadingKey];
+
+        // Section-level checkbox gate
+        const canMarkSectionApproved = overallStatus === "Pending" && (() => {
+          if (scanType === "Front & Back") {
+            // Both front and back must be manually approved first
+            return !!reqApprovals.front && !!reqApprovals.back;
+          }
+          return matching.some((u) => u.Approval_Status === "Approved");
+        })();
 
         return (
           <Box
@@ -729,7 +735,23 @@ function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRe
                   Front & Back
                 </Box>
               )}
-              <Box sx={{ ml: "auto" }}>
+              <Box sx={{ ml: "auto", display: "flex", alignItems: "center", gap: 1.5 }}>
+                {canMarkSectionApproved && (
+                  <Box
+                    sx={{ display: "flex", alignItems: "center", gap: 0.5, cursor: isSectionApproveLoading ? "default" : "pointer" }}
+                    onClick={() => !isSectionApproveLoading && onSectionApprove(row.id, req.name, "section")}
+                  >
+                    <Checkbox
+                      size="small"
+                      checked={false}
+                      disabled={isSectionApproveLoading}
+                      sx={{ p: 0.5, color: "#16a34a", "&.Mui-checked": { color: "#16a34a" } }}
+                    />
+                    <Typography fontSize={12} fontWeight={600} color={isSectionApproveLoading ? "#9ca3af" : "#16a34a"} noWrap>
+                      {isSectionApproveLoading ? "Approving..." : "Mark as Approved"}
+                    </Typography>
+                  </Box>
+                )}
                 <StatusBadge status={overallStatus} />
               </Box>
             </Box>
@@ -739,8 +761,13 @@ function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRe
               {scanType === "Front & Back" ? (
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
                   {["Front", "Back"].map((side) => {
+                    const sideLower = side.toLowerCase();
                     const sideUploads = matching.filter((u) => u.Scan_Type === side);
-                    const sideStatus = getSideStatus(sideUploads);
+                    const sideManuallyApproved = !!reqApprovals[sideLower];
+                    const sideStatus = sideManuallyApproved ? "Approved" : getSideStatus(sideUploads);
+                    const canMarkSideApproved = !sideManuallyApproved && sideUploads.some((u) => u.Approval_Status === "Approved");
+                    const sideLoadingKey = `${row.id}__${req.name}__${sideLower}`;
+                    const isSideApproveLoading = !!sectionApproveLoading?.[sideLoadingKey];
                     return (
                       <Box key={side}>
                         <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
@@ -753,6 +780,22 @@ function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRe
                             {side}
                           </Typography>
                           <StatusBadge status={sideStatus} />
+                          {canMarkSideApproved && (
+                            <Box
+                              sx={{ display: "flex", alignItems: "center", gap: 0.5, cursor: isSideApproveLoading ? "default" : "pointer" }}
+                              onClick={() => !isSideApproveLoading && onSectionApprove(row.id, req.name, sideLower)}
+                            >
+                              <Checkbox
+                                size="small"
+                                checked={false}
+                                disabled={isSideApproveLoading}
+                                sx={{ p: 0.5, color: "#16a34a", "&.Mui-checked": { color: "#16a34a" } }}
+                              />
+                              <Typography fontSize={11} fontWeight={600} color={isSideApproveLoading ? "#9ca3af" : "#16a34a"} noWrap>
+                                {isSideApproveLoading ? "Approving..." : "Mark as Approved"}
+                              </Typography>
+                            </Box>
+                          )}
                         </Box>
                         <UploadSubTable
                           uploads={sideUploads}
@@ -761,7 +804,7 @@ function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRe
                           row={row}
                           relatedRecord={relatedRecord}
                           onReview={onReview}
-                          viewOnly={sideStatus === "Approved"}
+                          viewOnly={sideManuallyApproved}
                         />
                       </Box>
                     );
@@ -775,7 +818,7 @@ function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRe
                   row={row}
                   relatedRecord={relatedRecord}
                   onReview={onReview}
-                  viewOnly={getSideStatus(matching) === "Approved"}
+                  viewOnly={false}
                 />
               )}
             </Box>
@@ -806,6 +849,8 @@ function Admins({ submissionLogs, onRefresh }) {
   const [reviewDialog, setReviewDialog] = useState(null); // { upload, parentRow, attachment }
   const [adminComments, setAdminComments] = useState({}); // { rowId: string }
   const [commentSubmitting, setCommentSubmitting] = useState({}); // { rowId: bool }
+  const [sectionApprovalsCache, setSectionApprovalsCache] = useState({}); // { recordId: { [reqName]: bool } }
+  const [sectionApproveLoading, setSectionApproveLoading] = useState({}); // { "rowId__reqName": bool }
   const reviewDialogSnapshot = useRef(null);
   if (reviewDialog) reviewDialogSnapshot.current = reviewDialog;
 
@@ -871,7 +916,13 @@ function Admins({ submissionLogs, onRefresh }) {
             : Promise.resolve(null),
         ]);
 
-      const uploads = recordResp?.data?.[0]?.Document_Uploads ?? [];
+      const record = recordResp?.data?.[0] ?? {};
+      const uploads = record.Document_Uploads ?? [];
+
+      const sectionApprovalsRaw = record.Section_Approvals;
+      const sectionApprovals = sectionApprovalsRaw
+        ? (typeof sectionApprovalsRaw === "string" ? JSON.parse(sectionApprovalsRaw) : sectionApprovalsRaw)
+        : {};
 
       // Build a map: attachment id → attachment object
       const attachMap = {};
@@ -882,6 +933,7 @@ function Admins({ submissionLogs, onRefresh }) {
       setUploadsCache((prev) => ({ ...prev, [row.id]: uploads }));
       setAttachmentsCache((prev) => ({ ...prev, [row.id]: attachMap }));
       setNotesCache((prev) => ({ ...prev, [row.id]: notesResp?.data ?? [] }));
+      setSectionApprovalsCache((prev) => ({ ...prev, [row.id]: sectionApprovals }));
       const dealRecord = relatedResp?.data?.[0] ?? null;
       setRelatedRecordCache((prev) => ({ ...prev, [row.id]: dealRecord }));
 
@@ -956,6 +1008,29 @@ function Admins({ submissionLogs, onRefresh }) {
       console.error("Failed to add admin note", err);
     } finally {
       setCommentSubmitting((prev) => ({ ...prev, [row.id]: false }));
+    }
+  };
+
+  // approvalKey: "section" for single docs; "front" | "back" | "section" for F&B docs
+  const handleSectionApprove = async (rowId, reqName, approvalKey) => {
+    const loadingKey = `${rowId}__${reqName}__${approvalKey}`;
+    setSectionApproveLoading((prev) => ({ ...prev, [loadingKey]: true }));
+    try {
+      const current = sectionApprovalsCache[rowId] ?? {};
+      const currentReq = current[reqName] ?? {};
+      const updated = { ...current, [reqName]: { ...currentReq, [approvalKey]: true } };
+      const resp = await ZOHO.CRM.API.updateRecord({
+        Entity: "Submission_Logs",
+        APIData: { id: rowId, Section_Approvals: JSON.stringify(updated) },
+        Trigger: [],
+      });
+      if (resp?.data?.[0]?.code === "SUCCESS") {
+        setSectionApprovalsCache((prev) => ({ ...prev, [rowId]: updated }));
+      }
+    } catch (err) {
+      console.error("Failed to approve section", err);
+    } finally {
+      setSectionApproveLoading((prev) => ({ ...prev, [loadingKey]: false }));
     }
   };
 
@@ -1268,6 +1343,9 @@ function Admins({ submissionLogs, onRefresh }) {
                                   row={row}
                                   relatedRecord={relatedRecordCache[row.id]}
                                   onReview={setReviewDialog}
+                                  sectionApprovals={sectionApprovalsCache[row.id] ?? {}}
+                                  onSectionApprove={handleSectionApprove}
+                                  sectionApproveLoading={sectionApproveLoading}
                                 />
                               ) : (
                                 <Typography
