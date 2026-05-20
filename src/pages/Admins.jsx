@@ -23,6 +23,7 @@ import {
   InputLabel,
   InputAdornment,
   Checkbox,
+  DialogActions,
 } from "@mui/material";
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import CloseIcon from "@mui/icons-material/Close";
@@ -45,6 +46,7 @@ const COLUMNS = [
 
 const DEAL_CANVAS_SUFFIX = "/canvas/434889000031449238";
 const DEAL_URL_BASE = "https://crm.zoho.eu/crm/org20080353658/tab/Potentials";
+const PORTAL_URL = process.env.REACT_APP_PORTAL_URL ?? "";
 
 
 const STATUS_STYLES = {
@@ -829,6 +831,151 @@ function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRe
   );
 }
 
+// ─── Admin Upload Dialog ──────────────────────────────────────────────────
+
+function AdminUploadDialog({ open, onClose, reqName, submissionLogId, adminUploads, onUploaded }) {
+  const [file, setFile] = useState(null);
+  const [comment, setComment] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    if (open) {
+      setFile(null);
+      setComment("");
+      setError("");
+    }
+  }, [open]);
+
+  const handleUpload = async () => {
+    if (!file) { setError("Please select a file."); return; }
+    setLoading(true);
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("submissionLogId", submissionLogId);
+      formData.append("file", file);
+
+      const resp = await fetch(`${PORTAL_URL}/api/widget/upload-attachment`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!resp.ok) throw new Error("Upload failed");
+      const data = await resp.json();
+      const attachmentId = data.attachmentId;
+
+      const newRow = {
+        Document_Name: file.name,
+        Document_Type: reqName,
+        Attachment_ID: attachmentId,
+        ...(comment.trim() && { Additional_Comment: comment.trim() }),
+      };
+
+      const existingRows = (adminUploads ?? []).map((u) => ({ id: u.id }));
+      const updateResp = await ZOHO.CRM.API.updateRecord({
+        Entity: "Submission_Logs",
+        APIData: { id: submissionLogId, Admin_Uploads: [...existingRows, newRow] },
+        Trigger: [],
+      });
+
+      if (updateResp?.data?.[0]?.code === "SUCCESS") {
+        onUploaded({ ...newRow, Created_Time: new Date().toISOString() });
+        onClose();
+      } else {
+        setError("Failed to save upload record.");
+      }
+    } catch (err) {
+      console.error("Admin upload failed", err);
+      setError("Upload failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={() => !loading && onClose()} maxWidth="sm" fullWidth>
+      <DialogTitle
+        sx={{ fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "space-between", pb: 1 }}
+      >
+        <Box>
+          <Typography variant="h6" fontWeight={700} fontSize={16}>Upload Document</Typography>
+          <Typography variant="body2" color="text.secondary" fontSize={12}>{reqName}</Typography>
+        </Box>
+        <IconButton size="small" onClick={onClose} disabled={loading}>
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent sx={{ pt: 1 }}>
+        <input
+          type="file"
+          ref={fileInputRef}
+          accept="image/*,.pdf"
+          style={{ display: "none" }}
+          onChange={(e) => { setFile(e.target.files[0] ?? null); setError(""); }}
+        />
+        <Box
+          onClick={() => fileInputRef.current?.click()}
+          sx={{
+            border: "2px dashed #c0c8d8",
+            borderRadius: 1.5,
+            py: 3,
+            textAlign: "center",
+            cursor: "pointer",
+            mb: 2,
+            "&:hover": { bgcolor: "#f5f7fa", borderColor: "#1b3a6b" },
+          }}
+        >
+          <InsertDriveFileOutlinedIcon sx={{ fontSize: 32, color: "#9ca3af", mb: 0.5 }} />
+          <Typography fontSize={13} color={file ? "#1b3a6b" : "text.secondary"} fontWeight={file ? 600 : 400}>
+            {file ? file.name : "Click to select a file (image or PDF)"}
+          </Typography>
+        </Box>
+
+        <Typography variant="caption" color="text.secondary" fontWeight={600}>
+          Comment (optional)
+        </Typography>
+        <TextField
+          multiline
+          minRows={2}
+          fullWidth
+          size="small"
+          placeholder="Add a note about this document..."
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          sx={{ mt: 0.5 }}
+        />
+
+        {error && (
+          <Typography fontSize={12} color="error" sx={{ mt: 1 }}>
+            {error}
+          </Typography>
+        )}
+      </DialogContent>
+
+      <DialogActions sx={{ px: 3, py: 2, gap: 1 }}>
+        <Button
+          variant="outlined"
+          onClick={onClose}
+          disabled={loading}
+          sx={{ textTransform: "none", borderColor: "#c0c8d8", color: "#333" }}
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          onClick={handleUpload}
+          disabled={!file || loading}
+          sx={{ textTransform: "none", bgcolor: "#1b3a6b", "&:hover": { bgcolor: "#2d60c4" } }}
+        >
+          {loading ? <CircularProgress size={18} sx={{ color: "white" }} /> : "Upload"}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 // ─── Main Admins Page ──────────────────────────────────────────────────────
 
 function Admins({ submissionLogs, onRefresh }) {
@@ -851,6 +998,8 @@ function Admins({ submissionLogs, onRefresh }) {
   const [commentSubmitting, setCommentSubmitting] = useState({}); // { rowId: bool }
   const [sectionApprovalsCache, setSectionApprovalsCache] = useState({}); // { recordId: { [reqName]: bool } }
   const [sectionApproveLoading, setSectionApproveLoading] = useState({}); // { "rowId__reqName": bool }
+  const [adminUploadsCache, setAdminUploadsCache] = useState({}); // { recordId: adminUpload[] }
+  const [adminUploadDialog, setAdminUploadDialog] = useState(null); // { reqName, rowId } | null
   const reviewDialogSnapshot = useRef(null);
   if (reviewDialog) reviewDialogSnapshot.current = reviewDialog;
 
@@ -918,6 +1067,8 @@ function Admins({ submissionLogs, onRefresh }) {
 
       const record = recordResp?.data?.[0] ?? {};
       const uploads = record.Document_Uploads ?? [];
+      const adminUploads = record.Admin_Uploads ?? [];
+      setAdminUploadsCache((prev) => ({ ...prev, [row.id]: adminUploads }));
 
       const sectionApprovalsRaw = record.Section_Approvals;
       const sectionApprovals = sectionApprovalsRaw
@@ -1318,6 +1469,7 @@ function Admins({ submissionLogs, onRefresh }) {
                             >
                               <Tab label="User Uploads" />
                               <Tab label="User Messages" />
+                              <Tab label="Admin Uploads" />
                             </Tabs>
 
                             {isLoading ? (
@@ -1356,7 +1508,7 @@ function Admins({ submissionLogs, onRefresh }) {
                                   No template structure found for this submission.
                                 </Typography>
                               )
-                            ) : (
+                            ) : activeTab === 1 ? (
                               /* ── User Messages tab ── */
                               <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                                 {/* Scrollable notes list */}
@@ -1513,6 +1665,89 @@ function Admins({ submissionLogs, onRefresh }) {
                                   </IconButton>
                                 </Box>
                               </Box>
+                            ) : (
+                              /* ── Admin Uploads tab ── */
+                              <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                                {template?.documentRequirements?.length ? (
+                                  template.documentRequirements.map((req) => {
+                                    const adminUps = (adminUploadsCache[row.id] ?? []).filter(
+                                      (u) => u.Document_Type === req.name,
+                                    );
+                                    return (
+                                      <Box
+                                        key={req.id}
+                                        sx={{ border: "1px solid #e0e4ea", borderRadius: 1.5, overflow: "hidden", bgcolor: "white" }}
+                                      >
+                                        {/* Section header */}
+                                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 2, py: 1.25, bgcolor: "#f5f7fa", borderBottom: "1px solid #e0e4ea" }}>
+                                          <Typography fontWeight={700} fontSize={14} color="#1b3a6b">{req.name}</Typography>
+                                          <Box component="span" sx={{
+                                            fontSize: 11, fontWeight: 600, px: 1, py: 0.25, borderRadius: 99,
+                                            bgcolor: req.requirement === "Required" ? "#eff6ff" : "#f9fafb",
+                                            color: req.requirement === "Required" ? "#1d4ed8" : "#6b7280",
+                                            border: `1px solid ${req.requirement === "Required" ? "#bfdbfe" : "#e5e7eb"}`,
+                                          }}>
+                                            {req.requirement === "Optional" ? "If Applicable" : req.requirement}
+                                          </Box>
+                                          {req.scanType === "Front & Back" && (
+                                            <Box component="span" sx={{ fontSize: 11, fontWeight: 600, px: 1, py: 0.25, borderRadius: 99, bgcolor: "#faf5ff", color: "#7c3aed", border: "1px solid #e9d5ff" }}>
+                                              Front & Back
+                                            </Box>
+                                          )}
+                                          <Box sx={{ ml: "auto" }}>
+                                            <Button
+                                              size="small"
+                                              variant="outlined"
+                                              onClick={() => setAdminUploadDialog({ reqName: req.name, rowId: row.id })}
+                                              sx={{ textTransform: "none", fontSize: 12, borderColor: "#1b3a6b", color: "#1b3a6b", "&:hover": { bgcolor: "#1b3a6b", color: "white" } }}
+                                            >
+                                              + Upload Document
+                                            </Button>
+                                          </Box>
+                                        </Box>
+
+                                        {/* Section body */}
+                                        <Box sx={{ p: 1.5 }}>
+                                          {adminUps.length === 0 ? (
+                                            <Typography variant="body2" color="text.secondary" sx={{ py: 1.5, px: 1, fontStyle: "italic" }}>
+                                              No admin uploads yet.
+                                            </Typography>
+                                          ) : (
+                                            <Table size="small" sx={{ bgcolor: "white" }}>
+                                              <TableHead>
+                                                <TableRow>
+                                                  {["Document Name", "Submitted On", "Comment"].map((h) => (
+                                                    <TableCell key={h} sx={{ bgcolor: "#eef1f6", fontWeight: 600, color: "#1b3a6b", borderBottom: "2px solid #e0e4ea", whiteSpace: "nowrap" }}>
+                                                      {h}
+                                                    </TableCell>
+                                                  ))}
+                                                </TableRow>
+                                              </TableHead>
+                                              <TableBody>
+                                                {adminUps.map((u, idx) => (
+                                                  <TableRow key={idx} hover>
+                                                    <TableCell sx={{ color: "#333", borderBottom: "1px solid #e0e4ea" }}>{u.Document_Name ?? "—"}</TableCell>
+                                                    <TableCell sx={{ color: "#555", borderBottom: "1px solid #e0e4ea", whiteSpace: "nowrap" }}>
+                                                      {u.Created_Time
+                                                        ? new Date(u.Created_Time).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Madrid" })
+                                                        : "—"}
+                                                    </TableCell>
+                                                    <TableCell sx={{ color: "#555", borderBottom: "1px solid #e0e4ea" }}>{u.Additional_Comment ?? "—"}</TableCell>
+                                                  </TableRow>
+                                                ))}
+                                              </TableBody>
+                                            </Table>
+                                          )}
+                                        </Box>
+                                      </Box>
+                                    );
+                                  })
+                                ) : (
+                                  <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
+                                    No template structure found for this submission.
+                                  </Typography>
+                                )}
+                              </Box>
                             )}
                           </Box>
                         </Collapse>
@@ -1546,6 +1781,22 @@ function Admins({ submissionLogs, onRefresh }) {
         onStatusUpdate={handleStatusUpdate}
         workdriveFolderId={reviewDialogSnapshot.current?.workdriveFolderId}
         viewOnly={reviewDialogSnapshot.current?.viewOnly ?? false}
+      />
+
+      <AdminUploadDialog
+        open={!!adminUploadDialog}
+        onClose={() => setAdminUploadDialog(null)}
+        reqName={adminUploadDialog?.reqName ?? ""}
+        submissionLogId={adminUploadDialog?.rowId ?? ""}
+        adminUploads={adminUploadsCache[adminUploadDialog?.rowId ?? ""] ?? []}
+        onUploaded={(newRow) => {
+          const rowId = adminUploadDialog?.rowId;
+          if (!rowId) return;
+          setAdminUploadsCache((prev) => ({
+            ...prev,
+            [rowId]: [...(prev[rowId] ?? []), newRow],
+          }));
+        }}
       />
     </Box>
   );

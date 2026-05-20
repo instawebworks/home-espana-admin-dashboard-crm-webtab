@@ -13,3 +13,4 @@
 | Fixed chat bubbles in User Messages — bubbles now wrap to content width instead of stretching full row width | 2 min | 5 min |
 | Changed "Optional" label to display as "If Applicable" in admin checklist view (underlying data unchanged) | <1 min | 1 min |
 | Changed "Optional" label to display as "If Applicable" in Template Editor dialog dropdown (underlying value unchanged) | <1 min | 1 min |
+| Added Admin Uploads tab to Admins page — per-requirement upload button, AdminUploadDialog (MUI), adminUploadsCache state, portal proxy upload flow (REACT_APP_PORTAL_URL), .env file | 15 min | 90 min |
