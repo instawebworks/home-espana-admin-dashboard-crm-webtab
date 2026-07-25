@@ -27,14 +27,31 @@ const CRM_RECORD_BASE =
 
 const COLUMNS = [
   { label: "Name", key: "Name" },
-  { label: "Module", key: "Module_Name" },
-  { label: "Status", key: "Template_Status" },
+  { label: "Country", key: "Allowed_For_Country" },
+  { label: "Documents", key: "_documents" },
   { label: "Password Field", key: "Password_Field" },
   { label: "Workdrive Folder ID Field", key: "Workdrive_Folder_ID_FIeld" },
   { label: "Modified Time", key: "Modified_Time" },
 ];
 
-function formatCell(key, value) {
+// "12 docs · 9 required" from the template's own JSON (already in the list response).
+function formatDocumentsCell(row) {
+  try {
+    const parsed =
+      typeof row.Template_JSON === "string"
+        ? JSON.parse(row.Template_JSON)
+        : row.Template_JSON;
+    const reqs = parsed?.documentRequirements ?? [];
+    if (!reqs.length) return "—";
+    const required = reqs.filter((r) => r.requirement === "Required").length;
+    return `${reqs.length} doc${reqs.length !== 1 ? "s" : ""} · ${required} required`;
+  } catch {
+    return "—";
+  }
+}
+
+function formatCell(key, value, row) {
+  if (key === "_documents") return formatDocumentsCell(row);
   if (key === "Modified_Time" && value)
     return new Date(value).toLocaleString("en-GB", {
       day: "2-digit",
@@ -137,6 +154,8 @@ function Templates({ documentTemplates, onTemplateCreated }) {
                     color: "#1b3a6b",
                     borderBottom: "2px solid #e0e4ea",
                     whiteSpace: "nowrap",
+                    py: 0.75,
+                    fontSize: 13,
                   }}
                 >
                   {col.label}
@@ -149,6 +168,8 @@ function Templates({ documentTemplates, onTemplateCreated }) {
                   color: "#1b3a6b",
                   borderBottom: "2px solid #e0e4ea",
                   whiteSpace: "nowrap",
+                  py: 0.75,
+                  fontSize: 13,
                 }}
               >
                 Actions
@@ -166,7 +187,7 @@ function Templates({ documentTemplates, onTemplateCreated }) {
                   {COLUMNS.map((col) => (
                     <TableCell
                       key={col.key}
-                      sx={{ color: "#333", whiteSpace: "nowrap" }}
+                      sx={{ color: "#333", whiteSpace: "nowrap", py: 0.5, fontSize: 13 }}
                     >
                       {col.key === "Name" ? (
                         <a
@@ -184,11 +205,11 @@ function Templates({ documentTemplates, onTemplateCreated }) {
                           {row.Name ?? "—"}
                         </a>
                       ) : (
-                        formatCell(col.key, row[col.key])
+                        formatCell(col.key, row[col.key], row)
                       )}
                     </TableCell>
                   ))}
-                  <TableCell sx={{ whiteSpace: "nowrap" }}>
+                  <TableCell sx={{ whiteSpace: "nowrap", py: 0.25 }}>
                     <IconButton
                       size="small"
                       onClick={() => handleEditClick(row)}

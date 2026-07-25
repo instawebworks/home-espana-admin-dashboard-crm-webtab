@@ -10,35 +10,30 @@ import {
   Button,
   Collapse,
   CircularProgress,
-  Dialog,
-  DialogTitle,
-  DialogContent,
   TextField,
-  IconButton,
-  Tabs,
-  Tab,
   Select,
   MenuItem,
   FormControl,
   InputLabel,
   InputAdornment,
-  Checkbox,
-  DialogActions,
 } from "@mui/material";
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
-import CloseIcon from "@mui/icons-material/Close";
-import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
-import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import SearchIcon from "@mui/icons-material/Search";
+import { SubmissionDetail } from "../components/submission/SubmissionDetail";
+import {
+  parseApplicants,
+  parseRequirements,
+  computeSignoffProgress,
+} from "../components/submission/submissionHelpers";
 
 const ZOHO = window.ZOHO;
-const ZOHO_BASE = "https://crm.zoho.eu";
 
 const COLUMNS = [
   { label: "Deal Name", key: "_deal_name", maxWidth: 200 },
   { label: "Client Name", key: "Client_Name" },
   { label: "Client Email", key: "Client_Email" },
-  { label: "Related Module", key: "Related_Module_Name" },
+  { label: "Applicants", key: "_applicants" },
+  { label: "Sign-off Progress", key: "_progress" },
   { label: "Submission Date", key: "Submission_Date" },
   { label: "Doc Uploads", key: "_doc_uploads" },
   { label: "Modified Time", key: "Modified_Time" },
@@ -46,38 +41,100 @@ const COLUMNS = [
 
 const DEAL_CANVAS_SUFFIX = "/canvas/434889000031449238";
 const DEAL_URL_BASE = "https://crm.zoho.eu/crm/org20080353658/tab/Potentials";
-const PORTAL_URL = process.env.REACT_APP_PORTAL_URL ?? "";
 
+// Same gradients as the applicant chips inside the expanded view.
+const AVATAR_GRADIENTS = [
+  "linear-gradient(150deg,#3b82f6,#1b3a6b)",
+  "linear-gradient(150deg,#8b5cf6,#5b21b6)",
+  "linear-gradient(150deg,#0ea5e9,#0c4a6e)",
+  "linear-gradient(150deg,#f59e0b,#b45309)",
+];
 
-const STATUS_STYLES = {
-  Pending: { bg: "#fff8e1", color: "#b45309", border: "#fde68a" },
-  Approved: { bg: "#ecfdf5", color: "#065f46", border: "#6ee7b7" },
-  Rejected: { bg: "#fff1f2", color: "#9f1239", border: "#fecdd3" },
-  Missing: { bg: "#fff1f2", color: "#9f1239", border: "#fecdd3" },
-};
+function initialsOf(name) {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
+}
 
-function StatusBadge({ status }) {
-  const style = STATUS_STYLES[status] ?? {
-    bg: "#f3f4f6",
-    color: "#374151",
-    border: "#d1d5db",
-  };
+function ApplicantsCell({ row }) {
+  const applicants = parseApplicants(row, []);
+  if (!applicants.length) return "—";
+  const shown = applicants.slice(0, 3);
+  const extra = applicants.length - shown.length;
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+      {shown.map((name, i) => (
+        <Box
+          key={name}
+          title={name}
+          sx={{
+            width: 22,
+            height: 22,
+            borderRadius: "7px",
+            display: "grid",
+            placeItems: "center",
+            fontSize: 10,
+            fontWeight: 700,
+            color: "white",
+            background: AVATAR_GRADIENTS[i % AVATAR_GRADIENTS.length],
+            flexShrink: 0,
+          }}
+        >
+          {initialsOf(name)}
+        </Box>
+      ))}
+      {extra > 0 && (
+        <Box
+          title={applicants.slice(3).join(", ")}
+          sx={{
+            width: 22,
+            height: 22,
+            borderRadius: "7px",
+            display: "grid",
+            placeItems: "center",
+            fontSize: 10,
+            fontWeight: 700,
+            color: "#475569",
+            bgcolor: "#eef1f6",
+            flexShrink: 0,
+          }}
+        >
+          +{extra}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function ProgressCell({ row, requirements }) {
+  const prog = computeSignoffProgress(row, requirements);
+  if (!prog) return "—";
+  const complete = prog.signed >= prog.total;
+  const started = prog.signed > 0;
+  const palette = complete
+    ? { bg: "#e7f6ec", color: "#0f7a37", border: "#b7e4c7" }
+    : started
+      ? { bg: "#eaf1fe", color: "#1b3a6b", border: "#bcd0f0" }
+      : { bg: "#eef1f6", color: "#475569", border: "#e0e4ea" };
   return (
     <Box
       component="span"
+      title={`${prog.signed} of ${prog.total} applicant sections signed off`}
       sx={{
         display: "inline-block",
-        px: 1.5,
+        px: 1.25,
         py: 0.25,
         borderRadius: 99,
         fontSize: 12,
         fontWeight: 700,
-        bgcolor: style.bg,
-        color: style.color,
-        border: `1px solid ${style.border}`,
+        fontVariantNumeric: "tabular-nums",
+        whiteSpace: "nowrap",
+        bgcolor: palette.bg,
+        color: palette.color,
+        border: `1px solid ${palette.border}`,
       }}
     >
-      {status ?? "—"}
+      {prog.signed}/{prog.total} signed off
     </Box>
   );
 }
@@ -104,904 +161,14 @@ function formatCell(key, row) {
   return row[key] ?? "—";
 }
 
-function formatNoteTime(isoString) {
-  const date = new Date(isoString);
-  const now = new Date();
-  const toDay = (d) =>
-    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const diffDays = Math.round((toDay(now) - toDay(date)) / 86400000);
-  const timeStr = date.toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: "Europe/Madrid",
-  });
-  if (diffDays === 0) return `Today at ${timeStr}`;
-  if (diffDays === 1) return `Yesterday at ${timeStr}`;
-  return (
-    date.toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      timeZone: "Europe/Madrid",
-    }) + ` at ${timeStr}`
-  );
-}
-
-// ─── Review Document Dialog ────────────────────────────────────────────────
-
-const CONNECTION = "zoho_crm_conn_used_in_widget_do_not_delete";
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "heic"]);
-const OFFICE_EXTS = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx"]);
-
-function ReviewDocumentDialog({
-  open,
-  onClose,
-  upload,
-  parentRow,
-  allUploads,
-  attachment,
-  onStatusUpdate,
-  workdriveFolderId,
-  viewOnly,
-}) {
-  const [docUrl, setDocUrl] = useState(null);
-  const [docLoading, setDocLoading] = useState(false);
-
-  const [comment, setComment] = useState("");
-  const [commentError, setCommentError] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
-
-  const ext = upload?.Document_Name?.split(".").pop()?.toLowerCase() ?? "";
-  const isImage = IMAGE_EXTS.has(ext);
-  const isPdf = ext === "pdf";
-  const currentStatus = upload?.Approval_Status;
-  const isDecided =
-    viewOnly || currentStatus === "Approved" || currentStatus === "Rejected";
-
-  useEffect(() => {
-    if (open) {
-      setComment("");
-      setCommentError(false);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || !upload?.Attachment_ID || !parentRow?.id) return;
-    setDocUrl(null);
-
-    // Images: thumbnailUrl is already in the attachment data — no fetch needed
-    if (isImage) {
-      if (attachment?.thumbnailUrl) setDocUrl(attachment.thumbnailUrl);
-      return;
-    }
-
-    // PDFs: fetch binary via CONNECTION and convert to data URL =>
-    if (!isPdf) return;
-
-    setDocLoading(true);
-    const fetchPdf = async () => {
-      try {
-        const resp = await ZOHO.CRM.CONNECTION.invoke(CONNECTION, {
-          url: `https://www.zohoapis.eu/crm/v8/Submission_Logs/${parentRow.id}/Attachments/${upload.Attachment_ID}`,
-          method: "GET",
-          param_type: 1,
-        });
-        const content = resp?.details?.statusMessage;
-        if (!content || typeof content !== "string") return;
-        // Mask each char to 0–255 so btoa() won't throw on high bytes
-        let binaryStr = "";
-        for (let i = 0; i < content.length; i++) {
-          binaryStr += String.fromCharCode(content.charCodeAt(i) & 0xff);
-        }
-        setDocUrl(`data:application/pdf;base64,${btoa(binaryStr)}`);
-      } catch (err) {
-        console.error("[DocPreview] PDF fetch failed", err);
-      } finally {
-        setDocLoading(false);
-      }
-    };
-    fetchPdf();
-    return () => setDocUrl(null);
-  }, [open, upload, parentRow, attachment, isImage, isPdf]);
-
-  const previewUrl = attachment?.$previewUrl
-    ? `${ZOHO_BASE}${attachment.$previewUrl}`
-    : null;
-
-  const renderPreview = () => {
-    if (docLoading)
-      return <CircularProgress size={28} sx={{ color: "#1b3a6b" }} />;
-    if (docUrl) {
-      if (isImage)
-        return (
-          <img
-            src={docUrl}
-            alt={upload?.Document_Name}
-            style={{
-              maxWidth: "100%",
-              maxHeight: 280,
-              objectFit: "contain",
-              borderRadius: 4,
-            }}
-          />
-        );
-      if (isPdf)
-        return (
-          <object
-            data={docUrl}
-            type="application/pdf"
-            width="100%"
-            height="300"
-            style={{ display: "block" }}
-          >
-            PDF could not be displayed.
-          </object>
-        );
-    }
-    if (OFFICE_EXTS.has(ext))
-      return (
-        <>
-          <InsertDriveFileOutlinedIcon
-            sx={{ fontSize: 48, color: "#9ca3af" }}
-          />
-          <Typography variant="body2" color="text.secondary" textAlign="center">
-            Word and Excel documents can be previewed through CRM Record only.
-            Open the CRM record to preview this document.
-          </Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              const org =
-                attachment?.$previewUrl?.match(/\/crm\/(org\d+)\//)?.[1];
-              const mod =
-                attachment?.$previewUrl?.match(/[?&]module=([^&]+)/)?.[1];
-              if (org && mod)
-                window.open(
-                  `${ZOHO_BASE}/crm/${org}/tab/${mod}/${parentRow.id}`,
-                  "_blank",
-                );
-            }}
-            sx={{
-              textTransform: "none",
-              fontSize: 12,
-              borderColor: "#1b3a6b",
-              color: "#1b3a6b",
-              "&:hover": { bgcolor: "#1b3a6b", color: "white" },
-            }}
-          >
-            View in CRM Record ↗
-          </Button>
-        </>
-      );
-    return (
-      <>
-        <InsertDriveFileOutlinedIcon sx={{ fontSize: 48, color: "#9ca3af" }} />
-        <Typography variant="body2" color="text.secondary">
-          Preview not available.
-        </Typography>
-      </>
-    );
-  };
-
-  const handleAction = async (status) => {
-    if (status === "Rejected" && !comment.trim()) {
-      setCommentError(true);
-      return;
-    }
-    setActionLoading(true);
-    try {
-      let newDocName = null;
-      let newAttachmentId = null;
-
-      if (status === "Approved" && upload.Attachment_ID) {
-        // Generate sequential name: "Passport 01.pdf", "Bank Statement 02.png", etc.
-        const approvedCount = (allUploads ?? []).filter(
-          (u) =>
-            u.id !== upload.id &&
-            u.Document_Type === upload.Document_Type &&
-            u.Approval_Status === "Approved",
-        ).length;
-        const seq = String(approvedCount + 1).padStart(2, "0");
-        newDocName = `${upload.Document_Type} ${seq} - ${upload.Submitted_For ?? "Unknown"}.${ext}`;
-
-        // Call Deluge custom function to handle binary file ops server-side
-        // (download → delete → re-upload with new name → WorkDrive upload)
-        const funcResp = await ZOHO.CRM.FUNCTIONS.execute(
-          "widget_rename_and_upload_attachment",
-          {
-            arguments: JSON.stringify({
-              record_id: String(parentRow.id),
-              attachment_id: String(upload.Attachment_ID),
-              new_name: newDocName,
-              workdrive_folder_id: workdriveFolderId || "",
-            }),
-          },
-        );
-        console.log("[ApproveOps] Function response", {
-          arguments: JSON.stringify({
-            record_id: String(parentRow.id),
-            attachment_id: String(upload.Attachment_ID),
-            new_name: newDocName,
-            workdrive_folder_id: workdriveFolderId || "",
-          }),
-        });
-        const output = funcResp?.details?.output
-          ? JSON.parse(funcResp.details.output)
-          : null;
-        newAttachmentId = output?.new_attachment_id ?? null;
-      }
-
-      // Build subform update rows
-      const allRows = (allUploads ?? []).map((u) => {
-        if (u.id !== upload.id) return { id: u.id };
-        const row = { id: u.id, Approval_Status: status };
-        if (newDocName) row.Document_Name = newDocName;
-        if (newAttachmentId) row.Attachment_ID = String(newAttachmentId);
-        if (comment.trim()) row.Admin_Comment = comment.trim();
-        return row;
-      });
-
-      // Build record-level API data
-      const apiData = { id: parentRow.id, Document_Uploads: allRows };
-
-      if (status === "Rejected") {
-        const madrid = new Date().toLocaleString("en-CA", {
-          timeZone: "Europe/Madrid",
-          hour12: false,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        });
-        const [datePart, timePart] = madrid.replace(/, /g, "T").split("T");
-        const offset =
-          new Date()
-            .toLocaleString("en-US", {
-              timeZone: "Europe/Madrid",
-              timeZoneName: "longOffset",
-            })
-            .split("GMT")[1] || "+01:00";
-        const dateTime = `${datePart}T${timePart}${offset}`;
-        apiData.Rejection_Name_Datetime = `${upload.Document_Name} -##- ${dateTime}`;
-      }
-
-      const resp = await ZOHO.CRM.API.updateRecord({
-        Entity: "Submission_Logs",
-        APIData: apiData,
-        Trigger: ["workflow"],
-      });
-
-      if (resp?.data?.[0]?.code === "SUCCESS") {
-        onStatusUpdate(
-          parentRow.id,
-          upload.id,
-          status,
-          comment.trim(),
-          newDocName,
-        );
-        onClose();
-      }
-    } catch (err) {
-      console.error("Failed to update approval status", err);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  return (
-    <Dialog
-      open={open}
-      onClose={() => !actionLoading && onClose()}
-      maxWidth="sm"
-      fullWidth
-    >
-      <DialogTitle
-        sx={{
-          fontWeight: 700,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          pb: 1,
-        }}
-      >
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-          Review Document
-          {isDecided && <StatusBadge status={currentStatus} />}
-        </Box>
-        <IconButton size="small" onClick={onClose} disabled={actionLoading}>
-          <CloseIcon fontSize="small" />
-        </IconButton>
-      </DialogTitle>
-
-      <DialogContent sx={{ pt: 0 }}>
-        {/* File name bar */}
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 1,
-            px: 1.5,
-            py: 1.25,
-            bgcolor: "#f5f7fa",
-            borderRadius: 1,
-            mb: 2,
-            border: "1px solid #e0e4ea",
-          }}
-        >
-          <InsertDriveFileOutlinedIcon
-            sx={{ color: "#1b3a6b", fontSize: 20 }}
-          />
-          <Typography fontWeight={600} fontSize={14} noWrap>
-            {upload?.Document_Name ?? "—"}
-          </Typography>
-        </Box>
-
-        {/* Document preview */}
-        <Box
-          sx={{
-            border: "1px solid #e0e4ea",
-            borderRadius: 1,
-            mb: 1.5,
-            minHeight: 180,
-            overflow: "hidden",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            bgcolor: "#f5f7fa",
-            p: 2,
-            gap: 1.5,
-          }}
-        >
-          {renderPreview()}
-          {previewUrl && !OFFICE_EXTS.has(ext) && (
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => window.open(previewUrl, "_blank")}
-              sx={{
-                textTransform: "none",
-                fontSize: 12,
-                borderColor: "#1b3a6b",
-                color: "#1b3a6b",
-                "&:hover": { bgcolor: "#1b3a6b", color: "white" },
-              }}
-            >
-              Open Full Preview ↗
-            </Button>
-          )}
-        </Box>
-
-        {!isDecided && (
-          <>
-            {/* Comment field */}
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              fontWeight={600}
-            >
-              Comment to Client
-            </Typography>
-            <TextField
-              multiline
-              minRows={3}
-              fullWidth
-              size="small"
-              placeholder="Add correction note for resubmission, if rejecting..."
-              value={comment}
-              onChange={(e) => {
-                setComment(e.target.value);
-                setCommentError(false);
-              }}
-              error={commentError}
-              helperText={
-                commentError
-                  ? "A comment is required when rejecting a document."
-                  : ""
-              }
-              sx={{ mt: 0.5, mb: 2 }}
-            />
-
-            {/* Approve / Reject buttons */}
-            <Box sx={{ display: "flex", gap: 1.5 }}>
-              <Button
-                fullWidth
-                variant="contained"
-                disabled={actionLoading}
-                onClick={() => handleAction("Approved")}
-                sx={{
-                  bgcolor: "#16a34a",
-                  "&:hover": { bgcolor: "#15803d" },
-                  textTransform: "none",
-                  fontWeight: 700,
-                }}
-              >
-                {actionLoading ? (
-                  <CircularProgress size={18} sx={{ color: "white" }} />
-                ) : (
-                  "Approve"
-                )}
-              </Button>
-              <Button
-                fullWidth
-                variant="contained"
-                disabled={actionLoading}
-                onClick={() => handleAction("Rejected")}
-                sx={{
-                  bgcolor: "#dc2626",
-                  "&:hover": { bgcolor: "#b91c1c" },
-                  textTransform: "none",
-                  fontWeight: 700,
-                }}
-              >
-                {actionLoading ? (
-                  <CircularProgress size={18} sx={{ color: "white" }} />
-                ) : (
-                  "Reject"
-                )}
-              </Button>
-            </Box>
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              sx={{ display: "block", mt: 1 }}
-            >
-              Reject with a clear comment so the client can rectify and
-              re-submit.
-            </Typography>
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── Checklist Upload View ────────────────────────────────────────────────
-
-function getSideStatus(uploads) {
-  if (!uploads.length) return "Missing";
-  if (uploads.every((u) => u.Approval_Status === "Rejected")) return "Rejected";
-  return "Pending";
-}
-
-function getReqStatus(req, uploads, sectionApprovals) {
-  if (sectionApprovals?.[req.name]?.section) return "Approved";
-
-  const matching = uploads.filter((u) => u.Document_Type === req.name);
-  if (matching.length === 0) return "Missing";
-  if (matching.every((u) => u.Approval_Status === "Rejected")) return "Rejected";
-  return "Pending";
-}
-
-function UploadSubTable({ uploads, allUploads, attachMap, row, relatedRecord, onReview, viewOnly }) {
-  if (!uploads.length) {
-    return (
-      <Typography
-        variant="body2"
-        color="text.secondary"
-        sx={{ py: 1.5, px: 1, fontStyle: "italic" }}
-      >
-        No uploads yet.
-      </Typography>
-    );
-  }
-  const COL_WIDTHS = { "Document Name": "auto", "Submitted For": 140, "Submitted On": 130, Status: 150, Actions: 100 };
-  return (
-    <Table size="small" sx={{ bgcolor: "white", borderRadius: 1, overflow: "hidden", tableLayout: "fixed", width: "100%" }}>
-      <TableHead>
-        <TableRow>
-          {["Document Name", "Submitted For", "Submitted On", "Status", "Actions"].map((h) => (
-            <TableCell
-              key={h}
-              sx={{
-                bgcolor: "#eef1f6",
-                fontWeight: 600,
-                color: "#1b3a6b",
-                borderBottom: "2px solid #e0e4ea",
-                whiteSpace: "nowrap",
-                width: COL_WIDTHS[h],
-              }}
-            >
-              {h}
-            </TableCell>
-          ))}
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {uploads.map((upload, idx) => (
-          <TableRow key={idx} hover>
-            <TableCell sx={{ color: "#333", borderBottom: "1px solid #e0e4ea", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {upload.Document_Name ?? "—"}
-            </TableCell>
-            <TableCell sx={{ color: "#333", borderBottom: "1px solid #e0e4ea", whiteSpace: "nowrap" }}>
-              {upload.Submitted_For ?? "—"}
-            </TableCell>
-            <TableCell sx={{ color: "#555", borderBottom: "1px solid #e0e4ea", whiteSpace: "nowrap" }}>
-              {upload.Created_Time
-                ? new Date(upload.Created_Time).toLocaleDateString("en-GB", {
-                    day: "2-digit", month: "short", year: "numeric",
-                    timeZone: "Europe/Madrid",
-                  })
-                : "—"}
-            </TableCell>
-            <TableCell sx={{ borderBottom: "1px solid #e0e4ea" }}>
-              <StatusBadge status={upload.Approval_Status} />
-            </TableCell>
-            <TableCell sx={{ borderBottom: "1px solid #e0e4ea" }}>
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() =>
-                  onReview({
-                    upload,
-                    parentRow: row,
-                    allUploads,
-                    attachment: attachMap[upload.Attachment_ID] ?? null,
-                    workdriveFolderId:
-                      relatedRecord?.easyworkdriveforcrm__Workdrive_Folder_ID_EXT ?? null,
-                    viewOnly: viewOnly ?? false,
-                  })
-                }
-                sx={{
-                  textTransform: "none",
-                  fontSize: 12,
-                  borderColor: "#1b3a6b",
-                  color: "#1b3a6b",
-                  "&:hover": { bgcolor: "#1b3a6b", color: "white" },
-                }}
-              >
-                Review
-              </Button>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-
-function ChecklistUploadsView({ requirements, uploads, attachMap, row, relatedRecord, onReview, sectionApprovals, onSectionApprove, sectionApproveLoading }) {
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-      {requirements.map((req) => {
-        const scanType = req.scanType ?? "Single";
-        const matching = uploads.filter((u) => u.Document_Type === req.name);
-        const overallStatus = getReqStatus(req, uploads, sectionApprovals);
-        const reqApprovals = sectionApprovals?.[req.name] ?? {};
-
-        const sectionLoadingKey = `${row.id}__${req.name}__section`;
-        const isSectionApproveLoading = !!sectionApproveLoading?.[sectionLoadingKey];
-
-        // Section-level checkbox gate
-        const canMarkSectionApproved = overallStatus === "Pending" && (() => {
-          if (scanType === "Front & Back") {
-            // Both front and back must be manually approved first
-            return !!reqApprovals.front && !!reqApprovals.back;
-          }
-          return matching.some((u) => u.Approval_Status === "Approved");
-        })();
-
-        return (
-          <Box
-            key={req.id}
-            sx={{ border: "1px solid #e0e4ea", borderRadius: 1.5, overflow: "hidden", bgcolor: "white" }}
-          >
-            {/* Section header */}
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 1,
-                px: 2,
-                py: 1.25,
-                bgcolor: "#f5f7fa",
-                borderBottom: "1px solid #e0e4ea",
-              }}
-            >
-              <Typography fontWeight={700} fontSize={14} color="#1b3a6b">
-                {req.name}
-              </Typography>
-              <Box
-                component="span"
-                sx={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  px: 1,
-                  py: 0.25,
-                  borderRadius: 99,
-                  bgcolor: req.requirement === "Required" ? "#eff6ff" : "#f9fafb",
-                  color: req.requirement === "Required" ? "#1d4ed8" : "#6b7280",
-                  border: `1px solid ${req.requirement === "Required" ? "#bfdbfe" : "#e5e7eb"}`,
-                }}
-              >
-                {req.requirement === "Optional" ? "If Applicable" : req.requirement}
-              </Box>
-              {scanType === "Front & Back" && (
-                <Box
-                  component="span"
-                  sx={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    px: 1,
-                    py: 0.25,
-                    borderRadius: 99,
-                    bgcolor: "#faf5ff",
-                    color: "#7c3aed",
-                    border: "1px solid #e9d5ff",
-                  }}
-                >
-                  Front & Back
-                </Box>
-              )}
-              <Box sx={{ ml: "auto", display: "flex", alignItems: "center", gap: 1.5 }}>
-                {canMarkSectionApproved && (
-                  <Box
-                    sx={{ display: "flex", alignItems: "center", gap: 0.5, cursor: isSectionApproveLoading ? "default" : "pointer" }}
-                    onClick={() => !isSectionApproveLoading && onSectionApprove(row.id, req.name, "section")}
-                  >
-                    <Checkbox
-                      size="small"
-                      checked={false}
-                      disabled={isSectionApproveLoading}
-                      sx={{ p: 0.5, color: "#16a34a", "&.Mui-checked": { color: "#16a34a" } }}
-                    />
-                    <Typography fontSize={12} fontWeight={600} color={isSectionApproveLoading ? "#9ca3af" : "#16a34a"} noWrap>
-                      {isSectionApproveLoading ? "Approving..." : "Mark as Approved"}
-                    </Typography>
-                  </Box>
-                )}
-                <StatusBadge status={overallStatus} />
-              </Box>
-            </Box>
-
-            {/* Body */}
-            <Box sx={{ p: 1.5 }}>
-              {scanType === "Front & Back" ? (
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-                  {["Front", "Back"].map((side) => {
-                    const sideLower = side.toLowerCase();
-                    const sideUploads = matching.filter((u) => u.Scan_Type === side);
-                    const sideManuallyApproved = !!reqApprovals[sideLower];
-                    const sideStatus = sideManuallyApproved ? "Approved" : getSideStatus(sideUploads);
-                    const canMarkSideApproved = !sideManuallyApproved && sideUploads.some((u) => u.Approval_Status === "Approved");
-                    const sideLoadingKey = `${row.id}__${req.name}__${sideLower}`;
-                    const isSideApproveLoading = !!sectionApproveLoading?.[sideLoadingKey];
-                    return (
-                      <Box key={side}>
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
-                          <Typography
-                            fontSize={11}
-                            fontWeight={700}
-                            color="#6b7280"
-                            sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}
-                          >
-                            {side}
-                          </Typography>
-                          <StatusBadge status={sideStatus} />
-                          {canMarkSideApproved && (
-                            <Box
-                              sx={{ display: "flex", alignItems: "center", gap: 0.5, cursor: isSideApproveLoading ? "default" : "pointer" }}
-                              onClick={() => !isSideApproveLoading && onSectionApprove(row.id, req.name, sideLower)}
-                            >
-                              <Checkbox
-                                size="small"
-                                checked={false}
-                                disabled={isSideApproveLoading}
-                                sx={{ p: 0.5, color: "#16a34a", "&.Mui-checked": { color: "#16a34a" } }}
-                              />
-                              <Typography fontSize={11} fontWeight={600} color={isSideApproveLoading ? "#9ca3af" : "#16a34a"} noWrap>
-                                {isSideApproveLoading ? "Approving..." : "Mark as Approved"}
-                              </Typography>
-                            </Box>
-                          )}
-                        </Box>
-                        <UploadSubTable
-                          uploads={sideUploads}
-                          allUploads={uploads}
-                          attachMap={attachMap}
-                          row={row}
-                          relatedRecord={relatedRecord}
-                          onReview={onReview}
-                          viewOnly={sideManuallyApproved}
-                        />
-                      </Box>
-                    );
-                  })}
-                </Box>
-              ) : (
-                <UploadSubTable
-                  uploads={matching}
-                  allUploads={uploads}
-                  attachMap={attachMap}
-                  row={row}
-                  relatedRecord={relatedRecord}
-                  onReview={onReview}
-                  viewOnly={false}
-                />
-              )}
-            </Box>
-          </Box>
-        );
-      })}
-    </Box>
-  );
-}
-
-// ─── Admin Upload Dialog ──────────────────────────────────────────────────
-
-function AdminUploadDialog({ open, onClose, reqName, submissionLogId, adminUploads, onUploaded }) {
-  const [file, setFile] = useState(null);
-  const [comment, setComment] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    if (open) {
-      setFile(null);
-      setComment("");
-      setError("");
-    }
-  }, [open]);
-
-  const handleUpload = async () => {
-    if (!file) { setError("Please select a file."); return; }
-    setLoading(true);
-    setError("");
-    try {
-      const formData = new FormData();
-      formData.append("submissionLogId", submissionLogId);
-      formData.append("file", file);
-
-      const resp = await fetch(`${PORTAL_URL}/api/widget/upload-attachment`, {
-        method: "POST",
-        body: formData,
-      });
-      if (!resp.ok) throw new Error("Upload failed");
-      const data = await resp.json();
-      const attachmentId = data.attachmentId;
-
-      const newRow = {
-        Document_Name: file.name,
-        Document_Type: reqName,
-        Attachment_ID: attachmentId,
-        ...(comment.trim() && { Additional_Comment: comment.trim() }),
-      };
-
-      const existingRows = (adminUploads ?? []).map((u) => ({ id: u.id }));
-      const updateResp = await ZOHO.CRM.API.updateRecord({
-        Entity: "Submission_Logs",
-        APIData: { id: submissionLogId, Admin_Uploads: [...existingRows, newRow] },
-        Trigger: [],
-      });
-
-      if (updateResp?.data?.[0]?.code === "SUCCESS") {
-        onUploaded({ ...newRow, Created_Time: new Date().toISOString() });
-        onClose();
-      } else {
-        setError("Failed to save upload record.");
-      }
-    } catch (err) {
-      console.error("Admin upload failed", err);
-      setError("Upload failed. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onClose={() => !loading && onClose()} maxWidth="sm" fullWidth>
-      <DialogTitle
-        sx={{ fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "space-between", pb: 1 }}
-      >
-        <Box>
-          <Typography variant="h6" fontWeight={700} fontSize={16}>Upload Document</Typography>
-          <Typography variant="body2" color="text.secondary" fontSize={12}>{reqName}</Typography>
-        </Box>
-        <IconButton size="small" onClick={onClose} disabled={loading}>
-          <CloseIcon fontSize="small" />
-        </IconButton>
-      </DialogTitle>
-
-      <DialogContent sx={{ pt: 1 }}>
-        <input
-          type="file"
-          ref={fileInputRef}
-          accept="image/*,.pdf"
-          style={{ display: "none" }}
-          onChange={(e) => { setFile(e.target.files[0] ?? null); setError(""); }}
-        />
-        <Box
-          onClick={() => fileInputRef.current?.click()}
-          sx={{
-            border: "2px dashed #c0c8d8",
-            borderRadius: 1.5,
-            py: 3,
-            textAlign: "center",
-            cursor: "pointer",
-            mb: 2,
-            "&:hover": { bgcolor: "#f5f7fa", borderColor: "#1b3a6b" },
-          }}
-        >
-          <InsertDriveFileOutlinedIcon sx={{ fontSize: 32, color: "#9ca3af", mb: 0.5 }} />
-          <Typography fontSize={13} color={file ? "#1b3a6b" : "text.secondary"} fontWeight={file ? 600 : 400}>
-            {file ? file.name : "Click to select a file (image or PDF)"}
-          </Typography>
-        </Box>
-
-        <Typography variant="caption" color="text.secondary" fontWeight={600}>
-          Comment (optional)
-        </Typography>
-        <TextField
-          multiline
-          minRows={2}
-          fullWidth
-          size="small"
-          placeholder="Add a note about this document..."
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          sx={{ mt: 0.5 }}
-        />
-
-        {error && (
-          <Typography fontSize={12} color="error" sx={{ mt: 1 }}>
-            {error}
-          </Typography>
-        )}
-      </DialogContent>
-
-      <DialogActions sx={{ px: 3, py: 2, gap: 1 }}>
-        <Button
-          variant="outlined"
-          onClick={onClose}
-          disabled={loading}
-          sx={{ textTransform: "none", borderColor: "#c0c8d8", color: "#333" }}
-        >
-          Cancel
-        </Button>
-        <Button
-          variant="contained"
-          onClick={handleUpload}
-          disabled={!file || loading}
-          sx={{ textTransform: "none", bgcolor: "#1b3a6b", "&:hover": { bgcolor: "#2d60c4" } }}
-        >
-          {loading ? <CircularProgress size={18} sx={{ color: "white" }} /> : "Upload"}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-// ─── Main Admins Page ──────────────────────────────────────────────────────
-
 function Admins({ submissionLogs, onRefresh }) {
   const [expandedId, setExpandedId] = useState(null);
-  const [activeTab, setActiveTab] = useState(0);
   const [dealOwnerFilter, setDealOwnerFilter] = useState("");
-  const [dealNamesMap, setDealNamesMap] = useState({}); // { dealId: dealName }
+  const [dealInfoMap, setDealInfoMap] = useState({}); // { dealId: { name, requirements } }
   const [dealNameSearch, setDealNameSearch] = useState("");
   const [extraSearchLogs, setExtraSearchLogs] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const searchDebounceRef = useRef(null);
-  const [uploadsCache, setUploadsCache] = useState({}); // { recordId: upload[] }
-  const [attachmentsCache, setAttachmentsCache] = useState({}); // { recordId: { attachmentId: attachment } }
-  const [notesCache, setNotesCache] = useState({}); // { recordId: note[] }
-  const [relatedRecordCache, setRelatedRecordCache] = useState({}); // { recordId: related module record }
-  const [templateCache, setTemplateCache] = useState({}); // { submissionId: parsedTemplateJSON }
-  const [loadingId, setLoadingId] = useState(null);
-  const [reviewDialog, setReviewDialog] = useState(null); // { upload, parentRow, attachment }
-  const [adminComments, setAdminComments] = useState({}); // { rowId: string }
-  const [commentSubmitting, setCommentSubmitting] = useState({}); // { rowId: bool }
-  const [sectionApprovalsCache, setSectionApprovalsCache] = useState({}); // { recordId: { [reqName]: bool } }
-  const [sectionApproveLoading, setSectionApproveLoading] = useState({}); // { "rowId__reqName": bool }
-  const [adminUploadsCache, setAdminUploadsCache] = useState({}); // { recordId: adminUpload[] }
-  const [adminUploadDialog, setAdminUploadDialog] = useState(null); // { reqName, rowId } | null
-  const reviewDialogSnapshot = useRef(null);
-  if (reviewDialog) reviewDialogSnapshot.current = reviewDialog;
 
   useEffect(() => {
     if (!submissionLogs?.length) return;
@@ -1016,173 +183,25 @@ function Admins({ submissionLogs, onRefresh }) {
     Promise.all(
       uniqueIds.map((id) =>
         ZOHO.CRM.API.getRecord({ Entity: "Deals", RecordID: id })
-          .then((resp) => ({ id, name: resp?.data?.[0]?.Deal_Name ?? "—" }))
-          .catch(() => ({ id, name: "—" })),
+          .then((resp) => {
+            const deal = resp?.data?.[0];
+            return {
+              id,
+              name: deal?.Deal_Name ?? "—",
+              requirements: parseRequirements(deal),
+            };
+          })
+          .catch(() => ({ id, name: "—", requirements: [] })),
       ),
     ).then((results) => {
       const map = {};
-      results.forEach(({ id, name }) => { map[id] = name; });
-      setDealNamesMap(map);
+      results.forEach(({ id, name, requirements }) => { map[id] = { name, requirements }; });
+      setDealInfoMap(map);
     });
   }, [submissionLogs]);
 
-  const handleToggle = async (row) => {
-    if (expandedId === row.id) {
-      setExpandedId(null);
-      return;
-    }
-    setExpandedId(row.id);
-    setActiveTab(0);
-    if (uploadsCache[row.id]) return;
-    setLoadingId(row.id);
-    try {
-      // Fetch subform uploads, CRM attachments, notes, and related Deal record in parallel
-      const [recordResp, attachResp, notesResp, relatedResp] =
-        await Promise.all([
-          ZOHO.CRM.API.getRecord({
-            Entity: "Submission_Logs",
-            RecordID: row.id,
-          }),
-          ZOHO.CRM.API.getRelatedRecords({
-            Entity: "Submission_Logs",
-            RecordID: row.id,
-            RelatedList: "Attachments",
-            page: 1,
-            per_page: 200,
-          }),
-          ZOHO.CRM.API.getRelatedRecords({
-            Entity: "Submission_Logs",
-            RecordID: row.id,
-            RelatedList: "Notes",
-            page: 1,
-            per_page: 200,
-          }),
-          row.Related_Module_Name && row.Related_Record_ID
-            ? ZOHO.CRM.API.getRecord({
-                Entity: row.Related_Module_Name,
-                RecordID: row.Related_Record_ID,
-              })
-            : Promise.resolve(null),
-        ]);
-
-      const record = recordResp?.data?.[0] ?? {};
-      const uploads = record.Document_Uploads ?? [];
-      const adminUploads = record.Admin_Uploads ?? [];
-      setAdminUploadsCache((prev) => ({ ...prev, [row.id]: adminUploads }));
-
-      const sectionApprovalsRaw = record.Section_Approvals;
-      const sectionApprovals = sectionApprovalsRaw
-        ? (typeof sectionApprovalsRaw === "string" ? JSON.parse(sectionApprovalsRaw) : sectionApprovalsRaw)
-        : {};
-
-      // Build a map: attachment id → attachment object
-      const attachMap = {};
-      (attachResp?.data ?? []).forEach((a) => {
-        attachMap[a.id] = a;
-      });
-
-      setUploadsCache((prev) => ({ ...prev, [row.id]: uploads }));
-      setAttachmentsCache((prev) => ({ ...prev, [row.id]: attachMap }));
-      setNotesCache((prev) => ({ ...prev, [row.id]: notesResp?.data ?? [] }));
-      setSectionApprovalsCache((prev) => ({ ...prev, [row.id]: sectionApprovals }));
-      const dealRecord = relatedResp?.data?.[0] ?? null;
-      setRelatedRecordCache((prev) => ({ ...prev, [row.id]: dealRecord }));
-
-      const additionalJson = dealRecord?.Additional_Template_JSON;
-      if (additionalJson) {
-        const parsed =
-          typeof additionalJson === "string"
-            ? JSON.parse(additionalJson)
-            : additionalJson;
-        setTemplateCache((prev) => ({ ...prev, [row.id]: parsed }));
-      }
-    } catch (err) {
-      console.error("Failed to fetch record data", err);
-      setUploadsCache((prev) => ({ ...prev, [row.id]: [] }));
-      setNotesCache((prev) => ({ ...prev, [row.id]: [] }));
-    } finally {
-      setLoadingId(null);
-    }
-  };
-
-  const handleStatusUpdate = (
-    parentId,
-    uploadId,
-    status,
-    comment,
-    newDocName,
-  ) => {
-    setUploadsCache((prev) => ({
-      ...prev,
-      [parentId]: (prev[parentId] ?? []).map((u) =>
-        u.id === uploadId
-          ? {
-              ...u,
-              Approval_Status: status,
-              ...(comment && { Admin_Comment: comment }),
-              ...(newDocName && { Document_Name: newDocName }),
-            }
-          : u,
-      ),
-    }));
-  };
-
-  const handleAdminComment = async (row) => {
-    const content = (adminComments[row.id] ?? "").trim();
-    if (!content) return;
-    setCommentSubmitting((prev) => ({ ...prev, [row.id]: true }));
-    try {
-      const resp = await ZOHO.CRM.API.insertRecord({
-        Entity: "Notes",
-        APIData: {
-          Parent_Id: row.id,
-          se_module: "Submission_Logs",
-          Note_Title: "Admin Note",
-          Note_Content: content,
-        },
-        Trigger: [],
-      });
-      if (resp?.data?.[0]?.code === "SUCCESS") {
-        const newNote = {
-          id: resp.data[0].details.id,
-          Note_Title: "Admin Note",
-          Note_Content: content,
-          Created_Time: new Date().toISOString(),
-        };
-        setNotesCache((prev) => ({
-          ...prev,
-          [row.id]: [...(prev[row.id] ?? []), newNote],
-        }));
-        setAdminComments((prev) => ({ ...prev, [row.id]: "" }));
-      }
-    } catch (err) {
-      console.error("Failed to add admin note", err);
-    } finally {
-      setCommentSubmitting((prev) => ({ ...prev, [row.id]: false }));
-    }
-  };
-
-  // approvalKey: "section" for single docs; "front" | "back" | "section" for F&B docs
-  const handleSectionApprove = async (rowId, reqName, approvalKey) => {
-    const loadingKey = `${rowId}__${reqName}__${approvalKey}`;
-    setSectionApproveLoading((prev) => ({ ...prev, [loadingKey]: true }));
-    try {
-      const current = sectionApprovalsCache[rowId] ?? {};
-      const currentReq = current[reqName] ?? {};
-      const updated = { ...current, [reqName]: { ...currentReq, [approvalKey]: true } };
-      const resp = await ZOHO.CRM.API.updateRecord({
-        Entity: "Submission_Logs",
-        APIData: { id: rowId, Section_Approvals: JSON.stringify(updated) },
-        Trigger: [],
-      });
-      if (resp?.data?.[0]?.code === "SUCCESS") {
-        setSectionApprovalsCache((prev) => ({ ...prev, [rowId]: updated }));
-      }
-    } catch (err) {
-      console.error("Failed to approve section", err);
-    } finally {
-      setSectionApproveLoading((prev) => ({ ...prev, [loadingKey]: false }));
-    }
+  const handleToggle = (row) => {
+    setExpandedId((prev) => (prev === row.id ? null : row.id));
   };
 
   const dealOwners = useMemo(() => {
@@ -1204,12 +223,12 @@ function Admins({ submissionLogs, onRefresh }) {
     const term = dealNameSearch.trim().toLowerCase();
     if (!term) return ownerFilteredLogs;
     const localMatches = ownerFilteredLogs.filter((r) =>
-      (dealNamesMap[r.Related_Record_ID] ?? "").toLowerCase().includes(term),
+      (dealInfoMap[r.Related_Record_ID]?.name ?? "").toLowerCase().includes(term),
     );
     const localIds = new Set(localMatches.map((r) => r.id));
     const extra = extraSearchLogs.filter((r) => !localIds.has(r.id));
     return [...localMatches, ...extra];
-  }, [ownerFilteredLogs, dealNamesMap, dealNameSearch, extraSearchLogs]);
+  }, [ownerFilteredLogs, dealInfoMap, dealNameSearch, extraSearchLogs]);
 
   const handleDealNameSearch = (value) => {
     setDealNameSearch(value);
@@ -1242,7 +261,10 @@ function Admins({ submissionLogs, onRefresh }) {
               });
               const logs = logResp?.data ?? [];
               if (logs.length) {
-                setDealNamesMap((prev) => ({ ...prev, [deal.id]: deal.Deal_Name }));
+                setDealInfoMap((prev) => ({
+                  ...prev,
+                  [deal.id]: { name: deal.Deal_Name, requirements: parseRequirements(deal) },
+                }));
               }
               return logs;
             } catch {
@@ -1321,6 +343,16 @@ function Admins({ submissionLogs, onRefresh }) {
             },
           }}
         />
+
+        {submissionLogs && (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{ ml: "auto", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
+          >
+            Showing {filteredLogs.length} of {submissionLogs.length}
+          </Typography>
+        )}
       </Box>
 
       <TableContainer
@@ -1343,6 +375,8 @@ function Admins({ submissionLogs, onRefresh }) {
                     color: "#1b3a6b",
                     borderBottom: "2px solid #e0e4ea",
                     whiteSpace: "nowrap",
+                    py: 0.75,
+                    fontSize: 13,
                   }}
                 >
                   {col.label}
@@ -1355,6 +389,8 @@ function Admins({ submissionLogs, onRefresh }) {
                   color: "#1b3a6b",
                   borderBottom: "2px solid #e0e4ea",
                   whiteSpace: "nowrap",
+                  py: 0.75,
+                  fontSize: 13,
                 }}
               >
                 Actions
@@ -1365,15 +401,16 @@ function Admins({ submissionLogs, onRefresh }) {
             {filteredLogs?.length ? (
               filteredLogs.map((row) => {
                 const isOpen = expandedId === row.id;
-                const isLoading = loadingId === row.id;
-                const uploads = uploadsCache[row.id] ?? [];
-                const attachMap = attachmentsCache[row.id] ?? {};
-                const notes = notesCache[row.id] ?? [];
-                const template = templateCache[row.id] ?? null;
+
+                const dealInfo = dealInfoMap[row.Related_Record_ID];
 
                 return (
                   <Fragment key={row.id}>
-                    <TableRow hover>
+                    <TableRow
+                      hover
+                      onClick={() => handleToggle(row)}
+                      sx={{ cursor: "pointer" }}
+                    >
                       {COLUMNS.map((col) => (
                         <TableCell
                           key={col.key}
@@ -1381,6 +418,8 @@ function Admins({ submissionLogs, onRefresh }) {
                             color: "#333",
                             whiteSpace: "nowrap",
                             borderBottom: isOpen ? 0 : "1px solid #e0e4ea",
+                            py: 0.5,
+                            fontSize: 13,
                             ...(col.maxWidth && {
                               maxWidth: col.maxWidth,
                               overflow: "hidden",
@@ -1389,12 +428,13 @@ function Admins({ submissionLogs, onRefresh }) {
                           }}
                         >
                           {col.key === "_deal_name" ? (
-                            row.Related_Record_ID && dealNamesMap[row.Related_Record_ID] ? (
+                            row.Related_Record_ID && dealInfo?.name && dealInfo.name !== "—" ? (
                               <Box
                                 component="a"
                                 href={`${DEAL_URL_BASE}/${row.Related_Record_ID}${DEAL_CANVAS_SUFFIX}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
                                 sx={{
                                   color: "#2d60c4",
                                   fontWeight: 600,
@@ -1406,9 +446,13 @@ function Admins({ submissionLogs, onRefresh }) {
                                   whiteSpace: "nowrap",
                                 }}
                               >
-                                {dealNamesMap[row.Related_Record_ID]}
+                                {dealInfo.name}
                               </Box>
                             ) : "—"
+                          ) : col.key === "_applicants" ? (
+                            <ApplicantsCell row={row} />
+                          ) : col.key === "_progress" ? (
+                            <ProgressCell row={row} requirements={dealInfo?.requirements} />
                           ) : formatCell(col.key, row)}
                         </TableCell>
                       ))}
@@ -1416,15 +460,20 @@ function Admins({ submissionLogs, onRefresh }) {
                         sx={{
                           borderBottom: isOpen ? 0 : "1px solid #e0e4ea",
                           whiteSpace: "nowrap",
+                          py: 0.5,
                         }}
                       >
                         <Button
                           size="small"
                           variant={isOpen ? "contained" : "outlined"}
-                          onClick={() => handleToggle(row)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggle(row);
+                          }}
                           sx={{
                             textTransform: "none",
                             fontSize: 12,
+                            py: 0.25,
                             bgcolor: isOpen ? "#1b3a6b" : undefined,
                             borderColor: "#1b3a6b",
                             color: isOpen ? "white" : "#1b3a6b",
@@ -1445,311 +494,7 @@ function Admins({ submissionLogs, onRefresh }) {
                         }}
                       >
                         <Collapse in={isOpen} timeout="auto" unmountOnExit>
-                          <Box
-                            sx={{ bgcolor: "#f9fafb", px: 3, pt: 1.5, pb: 2 }}
-                          >
-                            {/* Tabs */}
-                            <Tabs
-                              value={activeTab}
-                              onChange={(_, v) => setActiveTab(v)}
-                              sx={{
-                                mb: 1.5,
-                                minHeight: 36,
-                                "& .MuiTab-root": {
-                                  minHeight: 36,
-                                  textTransform: "none",
-                                  fontSize: 13,
-                                  fontWeight: 600,
-                                  color: "#6b7280",
-                                  px: 2,
-                                },
-                                "& .Mui-selected": { color: "#1b3a6b" },
-                                "& .MuiTabs-indicator": { bgcolor: "#1b3a6b" },
-                              }}
-                            >
-                              <Tab label="User Uploads" />
-                              <Tab label="User Messages" />
-                              <Tab label="Admin Uploads" />
-                            </Tabs>
-
-                            {isLoading ? (
-                              <Box
-                                sx={{
-                                  display: "flex",
-                                  justifyContent: "center",
-                                  py: 2,
-                                }}
-                              >
-                                <CircularProgress
-                                  size={24}
-                                  sx={{ color: "#1b3a6b" }}
-                                />
-                              </Box>
-                            ) : activeTab === 0 ? (
-                              /* ── User Uploads tab ── */
-                              template?.documentRequirements?.length ? (
-                                <ChecklistUploadsView
-                                  requirements={template.documentRequirements}
-                                  uploads={uploads}
-                                  attachMap={attachMap}
-                                  row={row}
-                                  relatedRecord={relatedRecordCache[row.id]}
-                                  onReview={setReviewDialog}
-                                  sectionApprovals={sectionApprovalsCache[row.id] ?? {}}
-                                  onSectionApprove={handleSectionApprove}
-                                  sectionApproveLoading={sectionApproveLoading}
-                                />
-                              ) : (
-                                <Typography
-                                  variant="body2"
-                                  color="text.secondary"
-                                  sx={{ py: 2, textAlign: "center" }}
-                                >
-                                  No template structure found for this submission.
-                                </Typography>
-                              )
-                            ) : activeTab === 1 ? (
-                              /* ── User Messages tab ── */
-                              <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                                {/* Scrollable notes list */}
-                                <Box
-                                  sx={{
-                                    bgcolor: "white",
-                                    border: "1px solid #e0e4ea",
-                                    borderRadius: 1,
-                                    p: 2,
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: 2,
-                                    maxHeight: 280,
-                                    overflowY: "auto",
-                                  }}
-                                >
-                                  {notes.length ? (
-                                    [...notes]
-                                      .sort((a, b) => new Date(a.Created_Time) - new Date(b.Created_Time))
-                                      .map((note) => {
-                                      const isAdmin = note.Note_Title === "Admin Note";
-                                      return (
-                                        <Box
-                                          key={note.id}
-                                          sx={{
-                                            display: "flex",
-                                            flexDirection: isAdmin ? "row-reverse" : "row",
-                                            gap: 1.5,
-                                            alignItems: "flex-start",
-                                          }}
-                                        >
-                                          {/* Avatar */}
-                                          <Box
-                                            sx={{
-                                              width: 34,
-                                              height: 34,
-                                              borderRadius: "50%",
-                                              bgcolor: isAdmin ? "#4f46e5" : "#1b3a6b",
-                                              color: "white",
-                                              display: "flex",
-                                              alignItems: "center",
-                                              justifyContent: "center",
-                                              fontSize: 13,
-                                              fontWeight: 700,
-                                              flexShrink: 0,
-                                              mt: 0.25,
-                                            }}
-                                          >
-                                            {isAdmin ? "A" : (row.Client_Name ?? "?")[0].toUpperCase()}
-                                          </Box>
-
-                                          {/* Bubble */}
-                                          <Box
-                                            sx={{
-                                              maxWidth: "70%",
-                                              display: "flex",
-                                              flexDirection: "column",
-                                              alignItems: isAdmin ? "flex-end" : "flex-start",
-                                            }}
-                                          >
-                                            <Box
-                                              sx={{
-                                                display: "flex",
-                                                alignItems: "baseline",
-                                                gap: 1,
-                                                mb: 0.5,
-                                                flexDirection: isAdmin ? "row-reverse" : "row",
-                                              }}
-                                            >
-                                              <Typography fontWeight={700} fontSize={13} color={isAdmin ? "#4f46e5" : "#1b3a6b"} noWrap>
-                                                {isAdmin ? "Admin" : (row.Client_Name ?? "Unknown")}
-                                              </Typography>
-                                              <Typography fontSize={11} color="text.secondary" flexShrink={0}>
-                                                {note.Created_Time ? formatNoteTime(note.Created_Time) : "—"}
-                                              </Typography>
-                                            </Box>
-                                            <Box
-                                              sx={{
-                                                bgcolor: isAdmin ? "#f5f3ff" : "#eef3ff",
-                                                border: `1px solid ${isAdmin ? "#ddd6fe" : "#d0ddf7"}`,
-                                                borderRadius: isAdmin ? "10px 0 10px 10px" : "0 10px 10px 10px",
-                                                px: 1.75,
-                                                py: 1,
-                                              }}
-                                            >
-                                              <Typography
-                                                fontSize={13}
-                                                color="#333"
-                                                sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
-                                              >
-                                                {note.Note_Content ?? "—"}
-                                              </Typography>
-                                            </Box>
-                                          </Box>
-                                        </Box>
-                                      );
-                                    })
-                                  ) : (
-                                    <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
-                                      No messages found.
-                                    </Typography>
-                                  )}
-                                </Box>
-
-                                {/* Admin reply input */}
-                                <Box
-                                  sx={{
-                                    display: "flex",
-                                    gap: 1,
-                                    alignItems: "flex-end",
-                                    bgcolor: "white",
-                                    border: "1px solid #e0e4ea",
-                                    borderRadius: 1,
-                                    px: 1.5,
-                                    py: 1,
-                                  }}
-                                >
-                                  <TextField
-                                    multiline
-                                    maxRows={4}
-                                    fullWidth
-                                    size="small"
-                                    placeholder="Write a note to add to this submission..."
-                                    value={adminComments[row.id] ?? ""}
-                                    onChange={(e) =>
-                                      setAdminComments((prev) => ({ ...prev, [row.id]: e.target.value }))
-                                    }
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter" && !e.shiftKey) {
-                                        e.preventDefault();
-                                        handleAdminComment(row);
-                                      }
-                                    }}
-                                    variant="standard"
-                                    slotProps={{ input: { disableUnderline: true } }}
-                                    sx={{ flex: 1 }}
-                                  />
-                                  <IconButton
-                                    onClick={() => handleAdminComment(row)}
-                                    disabled={
-                                      !adminComments[row.id]?.trim() ||
-                                      !!commentSubmitting[row.id]
-                                    }
-                                    sx={{
-                                      color: "#4f46e5",
-                                      "&:disabled": { color: "#d1d5db" },
-                                      mb: 0.25,
-                                    }}
-                                  >
-                                    {commentSubmitting[row.id]
-                                      ? <CircularProgress size={18} sx={{ color: "#4f46e5" }} />
-                                      : <SendRoundedIcon fontSize="small" />
-                                    }
-                                  </IconButton>
-                                </Box>
-                              </Box>
-                            ) : (
-                              /* ── Admin Uploads tab ── */
-                              <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-                                {template?.documentRequirements?.length ? (
-                                  template.documentRequirements.map((req) => {
-                                    const adminUps = (adminUploadsCache[row.id] ?? []).filter(
-                                      (u) => u.Document_Type === req.name,
-                                    );
-                                    return (
-                                      <Box
-                                        key={req.id}
-                                        sx={{ border: "1px solid #e0e4ea", borderRadius: 1.5, overflow: "hidden", bgcolor: "white" }}
-                                      >
-                                        {/* Section header */}
-                                        <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 2, py: 1.25, bgcolor: "#f5f7fa", borderBottom: "1px solid #e0e4ea" }}>
-                                          <Typography fontWeight={700} fontSize={14} color="#1b3a6b">{req.name}</Typography>
-                                          <Box component="span" sx={{
-                                            fontSize: 11, fontWeight: 600, px: 1, py: 0.25, borderRadius: 99,
-                                            bgcolor: req.requirement === "Required" ? "#eff6ff" : "#f9fafb",
-                                            color: req.requirement === "Required" ? "#1d4ed8" : "#6b7280",
-                                            border: `1px solid ${req.requirement === "Required" ? "#bfdbfe" : "#e5e7eb"}`,
-                                          }}>
-                                            {req.requirement === "Optional" ? "If Applicable" : req.requirement}
-                                          </Box>
-                                          {req.scanType === "Front & Back" && (
-                                            <Box component="span" sx={{ fontSize: 11, fontWeight: 600, px: 1, py: 0.25, borderRadius: 99, bgcolor: "#faf5ff", color: "#7c3aed", border: "1px solid #e9d5ff" }}>
-                                              Front & Back
-                                            </Box>
-                                          )}
-                                          <Box sx={{ ml: "auto" }}>
-                                            <Button
-                                              size="small"
-                                              variant="outlined"
-                                              onClick={() => setAdminUploadDialog({ reqName: req.name, rowId: row.id })}
-                                              sx={{ textTransform: "none", fontSize: 12, borderColor: "#1b3a6b", color: "#1b3a6b", "&:hover": { bgcolor: "#1b3a6b", color: "white" } }}
-                                            >
-                                              + Upload Document
-                                            </Button>
-                                          </Box>
-                                        </Box>
-
-                                        {/* Section body */}
-                                        <Box sx={{ p: 1.5 }}>
-                                          {adminUps.length === 0 ? (
-                                            <Typography variant="body2" color="text.secondary" sx={{ py: 1.5, px: 1, fontStyle: "italic" }}>
-                                              No admin uploads yet.
-                                            </Typography>
-                                          ) : (
-                                            <Table size="small" sx={{ bgcolor: "white" }}>
-                                              <TableHead>
-                                                <TableRow>
-                                                  {["Document Name", "Submitted On", "Comment"].map((h) => (
-                                                    <TableCell key={h} sx={{ bgcolor: "#eef1f6", fontWeight: 600, color: "#1b3a6b", borderBottom: "2px solid #e0e4ea", whiteSpace: "nowrap" }}>
-                                                      {h}
-                                                    </TableCell>
-                                                  ))}
-                                                </TableRow>
-                                              </TableHead>
-                                              <TableBody>
-                                                {adminUps.map((u, idx) => (
-                                                  <TableRow key={idx} hover>
-                                                    <TableCell sx={{ color: "#333", borderBottom: "1px solid #e0e4ea" }}>{u.Document_Name ?? "—"}</TableCell>
-                                                    <TableCell sx={{ color: "#555", borderBottom: "1px solid #e0e4ea", whiteSpace: "nowrap" }}>
-                                                      {u.Created_Time
-                                                        ? new Date(u.Created_Time).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Madrid" })
-                                                        : "—"}
-                                                    </TableCell>
-                                                    <TableCell sx={{ color: "#555", borderBottom: "1px solid #e0e4ea" }}>{u.Additional_Comment ?? "—"}</TableCell>
-                                                  </TableRow>
-                                                ))}
-                                              </TableBody>
-                                            </Table>
-                                          )}
-                                        </Box>
-                                      </Box>
-                                    );
-                                  })
-                                ) : (
-                                  <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
-                                    No template structure found for this submission.
-                                  </Typography>
-                                )}
-                              </Box>
-                            )}
-                          </Box>
+                          <SubmissionDetail row={row} />
                         </Collapse>
                       </TableCell>
                     </TableRow>
@@ -1770,34 +515,6 @@ function Admins({ submissionLogs, onRefresh }) {
           </TableBody>
         </Table>
       </TableContainer>
-
-      <ReviewDocumentDialog
-        open={!!reviewDialog}
-        onClose={() => setReviewDialog(null)}
-        upload={reviewDialogSnapshot.current?.upload}
-        parentRow={reviewDialogSnapshot.current?.parentRow}
-        allUploads={reviewDialogSnapshot.current?.allUploads}
-        attachment={reviewDialogSnapshot.current?.attachment}
-        onStatusUpdate={handleStatusUpdate}
-        workdriveFolderId={reviewDialogSnapshot.current?.workdriveFolderId}
-        viewOnly={reviewDialogSnapshot.current?.viewOnly ?? false}
-      />
-
-      <AdminUploadDialog
-        open={!!adminUploadDialog}
-        onClose={() => setAdminUploadDialog(null)}
-        reqName={adminUploadDialog?.reqName ?? ""}
-        submissionLogId={adminUploadDialog?.rowId ?? ""}
-        adminUploads={adminUploadsCache[adminUploadDialog?.rowId ?? ""] ?? []}
-        onUploaded={(newRow) => {
-          const rowId = adminUploadDialog?.rowId;
-          if (!rowId) return;
-          setAdminUploadsCache((prev) => ({
-            ...prev,
-            [rowId]: [...(prev[rowId] ?? []), newRow],
-          }));
-        }}
-      />
     </Box>
   );
 }

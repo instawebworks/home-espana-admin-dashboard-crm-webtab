@@ -1,0 +1,334 @@
+/* ── Overlay ── */
+.rm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* ── Modal box ── */
+.rm-modal {
+  background: #fff;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ── */
+.rm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.rm-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rm-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.rm-close {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: #6b7280;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.rm-close:hover:not(:disabled) {
+  color: #111827;
+}
+
+/* ── File name bar ── */
+.rm-filename-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 16px 0;
+  padding: 7px 10px;
+  background: #f5f7fa;
+  border: 1px solid #e0e4ea;
+  border-radius: 5px;
+}
+
+.rm-filename {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Preview box ── */
+.rm-preview-box {
+  margin: 8px 16px 0;
+  border: 1px solid #e0e4ea;
+  border-radius: 5px;
+  height: 150px;
+  background: #f5f7fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.rm-preview-img {
+  max-width: 100%;
+  max-height: 150px;
+  object-fit: contain;
+}
+
+.rm-preview-msg {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.rm-preview-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  padding: 0 16px;
+}
+
+.rm-preview-placeholder p {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0;
+}
+
+/* "Open Full Preview" sits at the right end of the filename bar */
+.rm-open-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: #fff;
+  border: 1px solid #1b3a6b;
+  color: #1b3a6b;
+  border-radius: 4px;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.rm-open-btn:hover {
+  background: #1b3a6b;
+  color: #fff;
+}
+
+/* ── File-name-on-approval section ── */
+.rm-name-section {
+  padding: 10px 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rm-name-row {
+  display: flex;
+  gap: 6px;
+}
+
+.rm-cat-select {
+  flex-shrink: 0;
+  max-width: 170px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  padding: 6px 6px;
+  font-size: 12px;
+  color: #1f2937;
+  background: #fff;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.rm-cat-select:focus {
+  border-color: #2563eb;
+}
+
+.rm-name-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  padding-right: 8px;
+  transition: border-color 0.15s;
+}
+
+.rm-name-wrap:focus-within {
+  border-color: #2563eb;
+}
+
+.rm-name-wrap--error {
+  border-color: #dc2626;
+}
+
+.rm-name-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #1f2937;
+  font-family: inherit;
+  outline: none;
+  background: transparent;
+}
+
+.rm-name-ext {
+  font-size: 12px;
+  color: #9ca3af;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.rm-name-hint {
+  font-size: 11px;
+  color: #9ca3af;
+  margin: 0;
+}
+
+/* ── Comment section ── */
+.rm-comment-section {
+  padding: 10px 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rm-comment-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.rm-textarea {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #1f2937;
+  resize: none;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.rm-textarea:focus {
+  border-color: #2563eb;
+}
+
+.rm-textarea--error {
+  border-color: #dc2626;
+}
+
+.rm-error {
+  font-size: 11px;
+  color: #dc2626;
+  margin: 0;
+}
+
+/* ── Action buttons ── */
+.rm-actions {
+  display: flex;
+  gap: 10px;
+  padding: 10px 16px 0;
+}
+
+.rm-approve-btn,
+.rm-reject-btn {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.rm-approve-btn {
+  background: #16a34a;
+  color: #fff;
+}
+
+.rm-approve-btn:hover:not(:disabled) {
+  background: #15803d;
+}
+
+.rm-reject-btn {
+  background: #dc2626;
+  color: #fff;
+}
+
+.rm-reject-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.rm-approve-btn:disabled,
+.rm-reject-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.rm-hint {
+  font-size: 11px;
+  color: #9ca3af;
+  margin: 5px 16px 12px;
+}
+
+/* ── Status badges ── */
+.rm-status {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.rm-status--approved {
+  color: #16a34a;
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.rm-status--pending {
+  color: #d97706;
+  border-color: #d97706;
+  background: #fffbeb;
+}
+
+.rm-status--rejected {
+  color: #fff;
+  background: #dc2626;
+  border-color: #dc2626;
+}
