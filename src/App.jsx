@@ -11,7 +11,15 @@ function App() {
   const [initialized, setInitialized] = useState(false); // initialize the widget
   const [documentTemplates, setDocumentTemplates] = useState(null); // keeps all the templates of Templates module
   const [submissionLogs, setSubmissionLogs] = useState(null); // keeps all the submission logs
-  const [activePage, setActivePage] = useState("Templates");
+  const [activePage, setActivePage] = useState("Dashboard");
+  // Set when the dashboard worklist opens a specific submission, so the Admins
+  // page can expand that row on arrival.
+  const [focusLogId, setFocusLogId] = useState(null);
+
+  const handleOpenSubmission = (logId) => {
+    setFocusLogId(logId);
+    setActivePage("Admins");
+  };
 
   useEffect(() => {
     // initialize the app
@@ -52,7 +60,13 @@ function App() {
   const renderPage = () => {
     switch (activePage) {
       case "Dashboard":
-        return <Dashboard />;
+        return (
+          <Dashboard
+            submissionLogs={submissionLogs}
+            documentTemplates={documentTemplates}
+            onOpenSubmission={handleOpenSubmission}
+          />
+        );
       case "Templates":
         return (
           <Templates
@@ -61,7 +75,7 @@ function App() {
           />
         );
       case "Admins":
-        return <Admins submissionLogs={submissionLogs} onRefresh={fetchSubmissionLogs} />;
+        return <Admins submissionLogs={submissionLogs} focusLogId={focusLogId} />;
       default:
         return null;
     }
@@ -69,7 +83,10 @@ function App() {
 
   return (
     <Box sx={{ display: "flex", bgcolor: "#eef1f6", height: "100vh", overflow: "hidden" }}>
-      <Sidebar activePage={activePage} onNavigate={setActivePage} />
+      <Sidebar
+        activePage={activePage}
+        onNavigate={(page) => { setFocusLogId(null); setActivePage(page); }}
+      />
 
       <Box
         sx={{

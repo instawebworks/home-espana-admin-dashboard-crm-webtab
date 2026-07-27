@@ -16,15 +16,21 @@ import {
   FormControl,
   InputLabel,
   InputAdornment,
+  IconButton,
 } from "@mui/material";
-import { useState, useEffect, useRef, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import SearchIcon from "@mui/icons-material/Search";
+import CloseIcon from "@mui/icons-material/Close";
 import { SubmissionDetail } from "../components/submission/SubmissionDetail";
 import {
   parseApplicants,
   parseRequirements,
   computeSignoffProgress,
+  dealOwnerOf,
+  dealNameOf,
+  NO_OWNER,
 } from "../components/submission/submissionHelpers";
+import { useDealNameSearch } from "../hooks/useDealNameSearch";
 
 const ZOHO = window.ZOHO;
 
@@ -50,6 +56,8 @@ const AVATAR_GRADIENTS = [
   "linear-gradient(150deg,#f59e0b,#b45309)",
 ];
 
+// Sentinel for the "no deal owner recorded" filter option — cannot collide with
+// a real owner name.
 function initialsOf(name) {
   const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return "?";
@@ -161,14 +169,33 @@ function formatCell(key, row) {
   return row[key] ?? "—";
 }
 
-function Admins({ submissionLogs, onRefresh }) {
+function Admins({ submissionLogs, focusLogId }) {
   const [expandedId, setExpandedId] = useState(null);
   const [dealOwnerFilter, setDealOwnerFilter] = useState("");
   const [dealInfoMap, setDealInfoMap] = useState({}); // { dealId: { name, requirements } }
-  const [dealNameSearch, setDealNameSearch] = useState("");
-  const [extraSearchLogs, setExtraSearchLogs] = useState([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const searchDebounceRef = useRef(null);
+  const search = useDealNameSearch();
+  // Field patches applied on top of the list-API rows, so summary columns stay
+  // in step with edits made inside an expanded row (and with the fresh record
+  // fetched on expand) without refetching all 200 logs.
+  const [rowPatches, setRowPatches] = useState({}); // { logId: Partial<row> }
+
+  const handleRecordUpdate = useCallback((logId, patch) => {
+    setRowPatches((prev) => {
+      const merged = { ...(prev[logId] ?? {}), ...patch };
+      const current = prev[logId];
+      // Skip the state write when nothing actually changed — the detail view
+      // pushes the same values on every expand.
+      if (
+        current &&
+        Object.keys(merged).every(
+          (k) => JSON.stringify(merged[k]) === JSON.stringify(current[k]),
+        )
+      ) {
+        return prev;
+      }
+      return { ...prev, [logId]: merged };
+    });
+  }, []);
 
   useEffect(() => {
     if (!submissionLogs?.length) return;
@@ -188,98 +215,88 @@ function Admins({ submissionLogs, onRefresh }) {
             return {
               id,
               name: deal?.Deal_Name ?? "—",
+              owner: deal?.Owner?.name ?? "",
               requirements: parseRequirements(deal),
             };
           })
-          .catch(() => ({ id, name: "—", requirements: [] })),
+          .catch(() => ({ id, name: "—", owner: "", requirements: [] })),
       ),
     ).then((results) => {
       const map = {};
-      results.forEach(({ id, name, requirements }) => { map[id] = { name, requirements }; });
+      results.forEach(({ id, name, owner, requirements }) => {
+        map[id] = { name, owner, requirements };
+      });
       setDealInfoMap(map);
     });
   }, [submissionLogs]);
+
+  // Arriving from the dashboard worklist: open that submission and bring it
+  // into view (the row may be far down a 200-row table).
+  useEffect(() => {
+    if (!focusLogId) return;
+    setExpandedId(focusLogId);
+    const frame = requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-log-row="${focusLogId}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusLogId]);
 
   const handleToggle = (row) => {
     setExpandedId((prev) => (prev === row.id ? null : row.id));
   };
 
+  // Distinct deal owners across the loaded logs, plus an "unassigned" bucket
+  // when some record has no owner resolvable yet.
   const dealOwners = useMemo(() => {
-    if (!submissionLogs) return [];
-    const seen = new Set();
-    return submissionLogs
-      .map((r) => ({ id: r.Owner?.id, name: r.Owner?.name }))
-      .filter((o) => o.id && !seen.has(o.id) && seen.add(o.id))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [submissionLogs]);
+    if (!submissionLogs) return { names: [], hasUnassigned: false };
+    const names = new Set();
+    let hasUnassigned = false;
+    submissionLogs.forEach((r) => {
+      const owner = dealOwnerOf(r, dealInfoMap);
+      if (owner) names.add(owner);
+      else hasUnassigned = true;
+    });
+    return {
+      names: [...names].sort((a, b) => a.localeCompare(b)),
+      hasUnassigned,
+    };
+  }, [submissionLogs, dealInfoMap]);
 
   const ownerFilteredLogs = useMemo(() => {
     if (!submissionLogs) return [];
     if (!dealOwnerFilter) return submissionLogs;
-    return submissionLogs.filter((r) => r.Owner?.id === dealOwnerFilter);
-  }, [submissionLogs, dealOwnerFilter]);
+    return submissionLogs.filter((r) => {
+      const owner = dealOwnerOf(r, dealInfoMap);
+      return dealOwnerFilter === NO_OWNER ? !owner : owner === dealOwnerFilter;
+    });
+  }, [submissionLogs, dealOwnerFilter, dealInfoMap]);
 
+  // Two complementary sources, unioned:
+  //  • local  — substring match over rows already loaded. Instant, and catches
+  //             mid-word fragments the API's word-prefix operator cannot.
+  //  • remote — Deal_Name search across the whole module, reaching records
+  //             outside the loaded page. The owner filter is applied to these
+  //             too, so the two controls compose.
   const filteredLogs = useMemo(() => {
-    const term = dealNameSearch.trim().toLowerCase();
-    if (!term) return ownerFilteredLogs;
-    const localMatches = ownerFilteredLogs.filter((r) =>
-      (dealInfoMap[r.Related_Record_ID]?.name ?? "").toLowerCase().includes(term),
-    );
-    const localIds = new Set(localMatches.map((r) => r.id));
-    const extra = extraSearchLogs.filter((r) => !localIds.has(r.id));
-    return [...localMatches, ...extra];
-  }, [ownerFilteredLogs, dealInfoMap, dealNameSearch, extraSearchLogs]);
+    const needle = search.term.trim().toLowerCase();
+    if (!needle) return ownerFilteredLogs;
 
-  const handleDealNameSearch = (value) => {
-    setDealNameSearch(value);
-    clearTimeout(searchDebounceRef.current);
-    if (!value.trim()) {
-      setExtraSearchLogs([]);
-      setSearchLoading(false);
-      return;
-    }
-    searchDebounceRef.current = setTimeout(async () => {
-      setSearchLoading(true);
-      try {
-        const dealResp = await ZOHO.CRM.API.searchRecord({
-          Entity: "Deals",
-          Type: "criteria",
-          Query: `(Deal_Name:contains:${value.trim()})`,
-        });
-        const deals = dealResp?.data ?? [];
-        const existingDealIds = new Set(
-          submissionLogs?.map((r) => r.Related_Record_ID) ?? [],
-        );
-        const newDeals = deals.filter((d) => !existingDealIds.has(d.id));
-        const newLogs = await Promise.all(
-          newDeals.map(async (deal) => {
-            try {
-              const logResp = await ZOHO.CRM.API.searchRecord({
-                Entity: "Submission_Logs",
-                Type: "criteria",
-                Query: `(Related_Record_ID:equals:${deal.id})`,
-              });
-              const logs = logResp?.data ?? [];
-              if (logs.length) {
-                setDealInfoMap((prev) => ({
-                  ...prev,
-                  [deal.id]: { name: deal.Deal_Name, requirements: parseRequirements(deal) },
-                }));
-              }
-              return logs;
-            } catch {
-              return [];
-            }
-          }),
-        );
-        setExtraSearchLogs(newLogs.flat());
-      } catch (err) {
-        console.error("Deal search failed", err);
-      } finally {
-        setSearchLoading(false);
-      }
-    }, 500);
-  };
+    const local = ownerFilteredLogs.filter((r) =>
+      dealNameOf(r, dealInfoMap).toLowerCase().includes(needle),
+    );
+
+    const seen = new Set(local.map((r) => r.id));
+    const remote = search.results.filter((r) => {
+      if (seen.has(r.id)) return false;
+      if (!dealOwnerFilter) return true;
+      const owner = dealOwnerOf(r, dealInfoMap);
+      return dealOwnerFilter === NO_OWNER ? !owner : owner === dealOwnerFilter;
+    });
+
+    return [...local, ...remote];
+  }, [ownerFilteredLogs, dealInfoMap, dealOwnerFilter, search.term, search.results]);
 
   const totalCols = COLUMNS.length + 1;
 
@@ -316,30 +333,50 @@ function Admins({ submissionLogs, onRefresh }) {
             label="Filter by Deal Owner"
           >
             <MenuItem value="">All Owners</MenuItem>
-            {dealOwners.map((o) => (
-              <MenuItem key={o.id} value={o.id}>
-                {o.name}
+            {dealOwners.names.map((name) => (
+              <MenuItem key={name} value={name}>
+                {name}
               </MenuItem>
             ))}
+            {dealOwners.hasUnassigned && (
+              <MenuItem value={NO_OWNER}>
+                <em>No deal owner</em>
+              </MenuItem>
+            )}
           </Select>
         </FormControl>
 
         <TextField
           size="small"
           placeholder="Search by deal name..."
-          value={dealNameSearch}
-          onChange={(e) => handleDealNameSearch(e.target.value)}
-          sx={{ width: 300 }}
+          value={search.term}
+          onChange={(e) => search.setTerm(e.target.value)}
+          error={search.failed}
+          helperText={
+            search.failed
+              ? "Search failed — showing loaded records only."
+              : search.isTooShort
+                ? `Type ${search.minChars} characters to search all records`
+                : " "
+          }
+          sx={{ width: 300, "& .MuiFormHelperText-root": { mt: 0.25, mb: -2.5 } }}
           slotProps={{
             input: {
               startAdornment: (
                 <InputAdornment position="start">
-                  {searchLoading
+                  {search.isBusy
                     ? <CircularProgress size={16} sx={{ color: "#6b7280" }} />
                     : <SearchIcon fontSize="small" sx={{ color: "#6b7280" }} />
                   }
                 </InputAdornment>
               ),
+              endAdornment: search.term ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={search.clear} aria-label="Clear search" sx={{ p: 0.25 }}>
+                    <CloseIcon sx={{ fontSize: 16, color: "#6b7280" }} />
+                  </IconButton>
+                </InputAdornment>
+              ) : null,
             },
           }}
         />
@@ -399,7 +436,9 @@ function Admins({ submissionLogs, onRefresh }) {
           </TableHead>
           <TableBody>
             {filteredLogs?.length ? (
-              filteredLogs.map((row) => {
+              filteredLogs.map((baseRow) => {
+                const patch = rowPatches[baseRow.id];
+                const row = patch ? { ...baseRow, ...patch } : baseRow;
                 const isOpen = expandedId === row.id;
 
                 const dealInfo = dealInfoMap[row.Related_Record_ID];
@@ -408,6 +447,7 @@ function Admins({ submissionLogs, onRefresh }) {
                   <Fragment key={row.id}>
                     <TableRow
                       hover
+                      data-log-row={row.id}
                       onClick={() => handleToggle(row)}
                       sx={{ cursor: "pointer" }}
                     >
@@ -428,7 +468,7 @@ function Admins({ submissionLogs, onRefresh }) {
                           }}
                         >
                           {col.key === "_deal_name" ? (
-                            row.Related_Record_ID && dealInfo?.name && dealInfo.name !== "—" ? (
+                            row.Related_Record_ID && dealNameOf(row, dealInfoMap) ? (
                               <Box
                                 component="a"
                                 href={`${DEAL_URL_BASE}/${row.Related_Record_ID}${DEAL_CANVAS_SUFFIX}`}
@@ -446,7 +486,7 @@ function Admins({ submissionLogs, onRefresh }) {
                                   whiteSpace: "nowrap",
                                 }}
                               >
-                                {dealInfo.name}
+                                {dealNameOf(row, dealInfoMap)}
                               </Box>
                             ) : "—"
                           ) : col.key === "_applicants" ? (
@@ -494,7 +534,7 @@ function Admins({ submissionLogs, onRefresh }) {
                         }}
                       >
                         <Collapse in={isOpen} timeout="auto" unmountOnExit>
-                          <SubmissionDetail row={row} />
+                          <SubmissionDetail row={row} onRecordUpdate={handleRecordUpdate} />
                         </Collapse>
                       </TableCell>
                     </TableRow>

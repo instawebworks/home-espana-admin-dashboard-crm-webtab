@@ -7,6 +7,8 @@ import {
   normalizeSectionApprovals,
   reqVisibleFor,
   parseRequirements,
+  belongsToApplicant,
+  isUnassigned,
 } from "./submissionHelpers";
 import "./UserUploads.css";
 
@@ -116,6 +118,11 @@ function FileRow({ upload, baseViewOnly, attachMap, submissionLog, workdriveFold
   return (
     <div className="uu-file">
       <span className="uu-file-name">{upload.Document_Name}</span>
+      {isUnassigned(upload.Submitted_For) && (
+        <span className="uu-unassigned" title="No applicant recorded on this upload — shown under every applicant">
+          Unassigned
+        </span>
+      )}
       <span className="uu-file-date">{formatDate(upload.Created_Time)}</span>
       <StatusPill status={st} />
       <button
@@ -151,7 +158,14 @@ function AdminStrip({ items, attachMap }) {
           <div key={idx} className="uu-admin-item">
             <span className="uu-admin-doc-ic">{ic.doc}</span>
             <div className="uu-admin-info">
-              <span className="uu-admin-name">{item.Document_Name}</span>
+              <span className="uu-admin-name">
+                {item.Document_Name}
+                {isUnassigned(item.Uploaded_For) && (
+                  <span className="uu-unassigned" title="No applicant recorded on this upload — shown under every applicant">
+                    Unassigned
+                  </span>
+                )}
+              </span>
               {item.Additional_Comment && (
                 <span className="uu-admin-comment">{item.Additional_Comment}</span>
               )}
@@ -179,7 +193,7 @@ function FinalizeRow({ label, checked, loading, onChange }) {
 
 /* ─────────────────────────  main  ───────────────────────── */
 
-export function UserUploads({ deal, submissionLog, attachMap }) {
+export function UserUploads({ deal, submissionLog, attachMap, onRecordUpdate }) {
   const [uploads, setUploads] = useState(submissionLog?.Document_Uploads ?? []);
   const [adminUploads, setAdminUploads] = useState(submissionLog?.Admin_Uploads ?? []);
   const [localAttachMap, setLocalAttachMap] = useState({});
@@ -213,7 +227,7 @@ export function UserUploads({ deal, submissionLog, attachMap }) {
   function buildReqView(req, applicantName) {
     const isFrontBack = req.scanType === "Front & Back";
     const mine = uploads.filter(
-      (u) => u.Document_Type === req.name && (u.Submitted_For ?? "").trim() === applicantName
+      (u) => u.Document_Type === req.name && belongsToApplicant(u.Submitted_For, applicantName)
     );
     const approvedByAdmin = sectionApprovals[applicantName]?.[req.name] === true;
     const hasApprovedFile = mine.some((u) => u.Approval_Status === "Approved");
@@ -239,7 +253,7 @@ export function UserUploads({ deal, submissionLog, attachMap }) {
     const status = approvedByAdmin ? "approved" : derived === "approved" ? "ready" : derived;
 
     const adminItems = adminUploads.filter(
-      (u) => u.Document_Type === req.name && (u.Uploaded_For ?? "").trim() === applicantName
+      (u) => u.Document_Type === req.name && belongsToApplicant(u.Uploaded_For, applicantName)
     );
 
     // Checkbox appears once at least one of this applicant's files is approved
@@ -302,6 +316,8 @@ export function UserUploads({ deal, submissionLog, attachMap }) {
       });
       if (resp?.data?.[0]?.code === "SUCCESS") {
         setSectionApprovalsCache((prev) => ({ ...prev, [rowId]: updated }));
+        // Keep the summary table's sign-off column in step with this change.
+        onRecordUpdate?.(rowId, { Section_Approvals: JSON.stringify(updated) });
       }
     } catch (err) {
       console.error("Failed to update section approval", err);

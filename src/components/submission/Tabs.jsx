@@ -5,7 +5,7 @@ import "./Tabs.css";
 
 const TABS = ["User Uploads", "User Messages"];
 
-export function Tabs({ deal, submissionLog, attachMap }) {
+export function Tabs({ deal, submissionLog, attachMap, onRecordUpdate }) {
   const [active, setActive] = useState(0);
 
   return (
@@ -24,7 +24,12 @@ export function Tabs({ deal, submissionLog, attachMap }) {
 
       <div className="tabs-content">
         {active === 0 && (
-          <UserUploads deal={deal} submissionLog={submissionLog} attachMap={attachMap} />
+          <UserUploads
+            deal={deal}
+            submissionLog={submissionLog}
+            attachMap={attachMap}
+            onRecordUpdate={onRecordUpdate}
+          />
         )}
         {active === 1 && (
           <UserMessages submissionLog={submissionLog} />
