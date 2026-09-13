@@ -603,6 +603,7 @@ export function UserUploads({ deal, submissionLog, attachMap, onRecordUpdate }) 
           workdriveFolderId={reviewSnapshot.current.workdriveFolderId}
           viewOnly={reviewSnapshot.current.viewOnly}
           onStatusUpdate={handleStatusUpdate}
+          deal={deal}
         />
       )}
 

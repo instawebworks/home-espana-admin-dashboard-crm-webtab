@@ -12,6 +12,40 @@ const ZOHO_BASE = "https://crm.zoho.eu";
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "heic"]);
 const OFFICE_EXTS = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx"]);
 
+// Portal reminder clock. A rejection means the client owes a re-upload, so the
+// Deal's Next_Portal_Reminder is pushed a week out (the CRM date-field workflow
+// fires `portal_reminder_check_and_send` on that day). Always sets the date
+// rather than checking for an empty one: the deal prop was loaded at page open
+// and could be stale. Skipped when the portal was never sent or the client is
+// lost; failures are logged, never surfaced, since the rejection itself succeeded.
+const REMINDER_DELAY_DAYS = 7;
+
+function madridDatePlusDays(days) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(Date.now() + days * 86400000));
+}
+
+async function pushPortalReminder(deal) {
+  if (!deal?.id) return;
+  if (deal.Portal_Sent !== "Yes" || deal.Stage === "Client Lost") return;
+  try {
+    const resp = await window.ZOHO.CRM.API.updateRecord({
+      Entity: "Deals",
+      APIData: { id: String(deal.id), Next_Portal_Reminder: madridDatePlusDays(REMINDER_DELAY_DAYS) },
+      Trigger: ["workflow"],
+    });
+    if (resp?.data?.[0]?.code !== "SUCCESS") {
+      console.error("[PortalReminder] Deal update failed", resp);
+    }
+  } catch (err) {
+    console.error("[PortalReminder] Deal update error", err);
+  }
+}
+
 function StatusBadge({ status }) {
   return (
     <span className={`rm-status rm-status--${(status ?? "").toLowerCase()}`}>
@@ -31,6 +65,7 @@ export function ReviewModal({
   workdriveFolderId,
   viewOnly,
   onStatusUpdate,
+  deal = null,
 }) {
   const [docUrl, setDocUrl] = useState(null);
   const [docLoading, setDocLoading] = useState(false);
@@ -197,6 +232,7 @@ export function ReviewModal({
       });
 
       if (resp?.data?.[0]?.code === "SUCCESS") {
+        if (status === "Rejected") await pushPortalReminder(deal);
         onStatusUpdate(upload.id, status, comment.trim(), newDocName, newAttachmentId);
         onClose();
       }
